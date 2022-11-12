@@ -32,6 +32,9 @@ fun <T : Any, R : Any> Collection<T>.toMapStrict(key: (T) -> R): Map<R, T> = fol
 
 class DBException(message: String, cause: Throwable? = null) : Exception(message, cause)
 
+/**
+ * Information needed to map on object into and out of a database.
+ */
 open class Entity(val tableName: String, val columnNames: List<String>, val fieldNames: List<String>) {
     /**
      * All the columns (in order), qualified with `prefix`, in a comma separated list.
@@ -83,6 +86,7 @@ class Params {
     fun add(params: Collection<SQLParam>) = params.forEach(::add)
 
     fun addInt(p: Int) = params.add(p.sql)
+    fun addDouble(p: Double) = params.add(p.sql)
     fun addString(p: String) = params.add(p.sql)
     fun addStrings(ps: Collection<String>) = ps.forEach { params.add(it.sql) }
     fun addStrings(vararg ps: String) = ps.forEach { params.add(it.sql) }
