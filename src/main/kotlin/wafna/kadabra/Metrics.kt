@@ -4,7 +4,7 @@ import com.codahale.metrics.Snapshot
 import com.codahale.metrics.Timer
 import java.util.concurrent.TimeUnit
 
-fun Timer.updateInstants(start: Long, end: Long = System.currentTimeMillis()) {
+fun Timer.updateInterval(start: Long, end: Long = System.currentTimeMillis()) {
     require(start <= end)
     update(end - start, TimeUnit.MILLISECONDS)
 }
@@ -12,7 +12,7 @@ fun Timer.updateInstants(start: Long, end: Long = System.currentTimeMillis()) {
 suspend fun <T> Timer.scope(block: suspend () -> T): T {
     val start = System.currentTimeMillis()
     return block().also {
-        updateInstants(start)
+        updateInterval(start)
     }
 }
 
