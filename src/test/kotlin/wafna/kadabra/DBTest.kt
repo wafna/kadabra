@@ -36,6 +36,8 @@ suspend fun DB.initThingies() {
 // The nanos resolution of the timestamp gets lost in the round trip to the database.
 fun Timestamp.normalize(): Timestamp = Timestamp.from(Instant.ofEpochMilli(time))
 
+fun Thingy.normalize(): Thingy = copy(tstamp = tstamp.normalize())
+
 class DBTest {
     @Test
     fun test1() {
@@ -58,7 +60,7 @@ class DBTest {
                     val inT = Thingy(UUID.randomUUID(), "thing-1", 42, 6.023e23, Timestamp.from(Instant.now()))
                     cx.insert(thingy, inT)
                     val outT = cx.unique<Thingy>("""SELECT ${thingy.columnNames.project()} FROM ${thingy.tableName}""")!!
-                    assertEquals(inT.copy(tstamp = inT.tstamp.normalize()), outT.copy(tstamp = outT.tstamp.normalize()))
+                    assertEquals(inT.normalize(), outT.normalize())
                 }
             }
         }
