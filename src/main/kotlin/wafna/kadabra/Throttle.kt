@@ -19,10 +19,8 @@ class Throttle(minInterval: Duration) {
 
     private val intervalMS = minInterval.inWholeMilliseconds
 
-    // The time at which the most recent call is scheduled to execute.
-    // Note that this can be in the future.
-    private var lastCall = 0L
     private val mutex = Mutex()
+    private var lastCall = 0L
 
     /**
      * Delays until the minimum interval between calls has elapsed and then calls the provided function.

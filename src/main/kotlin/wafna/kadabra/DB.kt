@@ -72,8 +72,10 @@ data class DBConfig(
 /**
  * Borrow a DB.
  */
-suspend fun runDB(config: DBConfig, listener: DBListener = DBListenerNOOP, borrow: (DB) -> Unit) {
-    DB(config, listener).use(borrow)
+suspend fun runDB(config: DBConfig, listener: DBListener = DBListenerNOOP, borrow: suspend (DB) -> Unit) {
+    DB(config, listener).use { db ->
+        borrow(db)
+    }
 }
 
 /**
