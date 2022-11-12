@@ -10,7 +10,6 @@ import kotlin.time.Duration
  * Provides for limiting the rate of some activity, e.g. calling an API,
  * by enforcing a minimum interval between actions.
  * @param minInterval Must be non-negative (can be zero).
- * This is thread safe.
  */
 class Throttle(minInterval: Duration) {
 
@@ -27,6 +26,7 @@ class Throttle(minInterval: Duration) {
 
     /**
      * Delays until the minimum interval between calls has elapsed and then calls the provided function.
+     * This is thread safe.
      */
     suspend fun <T> flow(fn: suspend () -> T): T {
         val now = System.currentTimeMillis()

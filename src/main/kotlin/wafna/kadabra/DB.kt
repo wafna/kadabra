@@ -63,7 +63,7 @@ data class DBConfig(
      */
     val delayStrategy: DelayStrategy,
     /**
-     *
+     * Minimum elapsed time between transactions.
      */
     val throttle: Duration,
     val hikariConfig: HikariConfig
