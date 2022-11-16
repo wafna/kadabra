@@ -91,6 +91,7 @@ class Params {
     fun addStrings(ps: Collection<String>) = ps.forEach { params.add(it.sql) }
     fun addStrings(vararg ps: String) = ps.forEach { params.add(it.sql) }
     fun addBigDecimal(p: BigDecimal) = params.add(p.sql)
+
     // fun addBigDecimals(ps: Collection<BigDecimal>) = ps.forEach { params.add(it.sql) }
     fun addTimestamp(p: Timestamp) = params.add(p.sql)
     fun addTimestamp(p: Instant) = params.add(Timestamp(p.toEpochMilli()).sql)
@@ -135,22 +136,40 @@ internal fun <T : Any> makeReadRecord(kClass: KClass<T>): RecordReader<T> {
     val fields: List<FieldReader> = params.withIndex().map { ctorParam ->
         val columnIndex = 1 + ctorParam.index
         when (ctorParam.value.type) {
-            java.lang.Character::class.java ->
-                { rs ->
-                    rs.getString(columnIndex).let {
-                        if (it.isEmpty()) null
-                        else it[0]
-                    }
+            java.lang.Character::class.java -> { rs ->
+                rs.getString(columnIndex).let {
+////                        // Fudge for Oracle
+////                        if (it.isEmpty()) null
+//                        else it[0]
+                    it[0]
+                }.let {
+                    if (rs.wasNull()) null else it
                 }
-            java.lang.String::class.java ->
-                { rs -> rs.getString(columnIndex) }
-            java.lang.Integer::class.java ->
-                { rs -> rs.getInt(columnIndex) }
-            java.lang.Double::class.java ->
-                { rs -> rs.getDouble(columnIndex) }
-            // We'll assume it's some object.
-            else ->
-                { rs -> rs.getObject(columnIndex) }
+            }
+
+            java.lang.String::class.java -> { rs ->
+                rs.getString(columnIndex).let {
+                    if (rs.wasNull()) null else it
+                }
+            }
+
+            java.lang.Integer::class.java -> { rs ->
+                rs.getInt(columnIndex).let {
+                    if (rs.wasNull()) null else it
+                }
+            }
+
+            java.lang.Double::class.java -> { rs ->
+                rs.getDouble(columnIndex).let {
+                    if (rs.wasNull()) null else it
+                }
+            }
+            // Punt.
+            else -> { rs ->
+                rs.getObject(columnIndex).let {
+                    if (rs.wasNull()) null else it
+                }
+            }
         }
     }
     return RecordReader(ctor, fields)
@@ -328,16 +347,19 @@ fun <T : Any> Connection.insert(
                     override fun writeValue(ps: PreparedStatement, pos: Int, value: Any) =
                         ps.setString(pos, value as String)
                 }
+
             java.lang.Integer::class.java.canonicalName ->
                 object : FieldWriter<T>(prop, Types.INTEGER) {
                     override fun writeValue(ps: PreparedStatement, pos: Int, value: Any) =
                         ps.setInt(pos, value as Int)
                 }
+
             java.lang.Double::class.java.canonicalName ->
                 object : FieldWriter<T>(prop, Types.DOUBLE) {
                     override fun writeValue(ps: PreparedStatement, pos: Int, value: Any) =
                         ps.setDouble(pos, value as Double)
                 }
+
             else ->
                 object : FieldWriter<T>(prop, Types.JAVA_OBJECT) {
                     override fun writeValue(ps: PreparedStatement, pos: Int, value: Any) =
