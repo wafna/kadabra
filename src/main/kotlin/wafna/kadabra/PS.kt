@@ -15,13 +15,14 @@ import kotlin.reflect.jvm.jvmName
  * Converts a collection to a map by applying a key generating function to each element.
  * Fails on key collisions.
  */
-fun <T : Any, R : Any> Collection<T>.toMapStrict(key: (T) -> R): Map<R, T> = fold(TreeMap<R, T>()) { map, elem ->
-    val k = key(elem)
-    if (map.containsKey(k))
-        throw DBException("Duplicate key: $k")
-    map[k] = elem
-    map
-}
+private fun <T : Any, R : Any> Collection<T>.toMapStrict(key: (T) -> R): Map<R, T> =
+    fold(TreeMap<R, T>()) { map, elem ->
+        val k = key(elem)
+        if (map.containsKey(k))
+            throw DBException("Duplicate key: $k")
+        map[k] = elem
+        map
+    }
 
 class DBException(message: String, cause: Throwable? = null) : Exception(message, cause)
 
