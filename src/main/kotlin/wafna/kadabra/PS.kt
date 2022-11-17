@@ -303,16 +303,7 @@ internal abstract class FieldWriter<R, T : Any>(private val prop: KProperty1<R, 
 
 /**
  * Inserts a collection of records into a table.
- * NB Oracle's support for inserting multiple values in a single SQL statement is not good (and not portable),
- * so we do one per call.
- *
- * @param columns Pairs the table fields with the object fields.
  */
-@Throws(SQLException::class, DBException::class)
-inline fun <reified T : Any> Connection.insert(
-    table: String, columns: Collection<Pair<String, String>>, record: T
-): Int = insert(T::class, table, columns, record)
-
 @Throws(SQLException::class, DBException::class)
 inline fun <reified T : Any> Connection.insert(entity: Entity, record: T): Int =
     insert(T::class, entity.tableName, entity.fieldMap, record)
@@ -321,7 +312,8 @@ inline fun <reified T : Any> Connection.insert(entity: Entity, record: T): Int =
  * Non-inlined version of insert.
  */
 @Throws(SQLException::class, DBException::class)
-fun <T : Any> Connection.insert(
+@PublishedApi
+internal fun <T : Any> Connection.insert(
     kClass: KClass<T>, table: String, columns: Collection<Pair<String, String>>, record: T
 ): Int {
     require(columns.isNotEmpty()) { "No columns are declared." }
@@ -419,7 +411,8 @@ inline fun <reified T : Any> Connection.unique(sql: String): T? =
  * Non-inlined version of unique.
  */
 @Throws(SQLException::class, DBException::class)
-fun <T : Any> Connection.unique(
+@PublishedApi
+internal fun <T : Any> Connection.unique(
     kClass: KClass<T>, sql: String, params: Array<out SQLParam>
 ): T? {
     prepareStatement(sql).use { ps ->
@@ -433,14 +426,6 @@ fun <T : Any> Connection.unique(
     }
 }
 
-//@Throws(SQLException::class, DBException::class)
-//inline fun <reified T : Any> Connection.list(sql: String, vararg params: SQLParam): List<T> =
-//    list(T::class, sql, params)
-//
-//@Throws(SQLException::class, DBException::class)
-//inline fun <reified T : Any> Connection.list(sql: String, params: Params): List<T> =
-//    list(T::class, sql, params.array())
-//
 @Throws(SQLException::class, DBException::class)
 inline fun <reified T : Any> Connection.list(sql: String, params: (Params.() -> Unit)): List<T> =
     list(T::class, sql, Params().also { p -> p.params() }.array())
@@ -454,7 +439,8 @@ inline fun <reified T : Any> Connection.list(sql: String): List<T> =
  * Non-inlined implementation of list.
  */
 @Throws(SQLException::class, DBException::class)
-fun <T : Any> Connection.list(
+@PublishedApi
+internal fun <T : Any> Connection.list(
     kClass: KClass<T>, sql: String, params: Array<out SQLParam>
 ): List<T> {
     prepareStatement(sql).use { ps ->

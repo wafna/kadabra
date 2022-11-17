@@ -10,8 +10,23 @@ import kotlin.test.assertEquals
 import kotlin.time.Duration.Companion.hours
 import kotlin.time.Duration.Companion.milliseconds
 
-data class Thingy1(val id: UUID, val name: String, val integer: Int, val double: Double, val tstamp: Timestamp, val guid: UUID)
-data class Thingy2(val id: UUID, val name: String?, val integer: Int?, val double: Double?, val tstamp: Timestamp?, val guid: UUID?)
+data class Thingy1(
+    val id: UUID,
+    val name: String,
+    val integer: Int,
+    val double: Double,
+    val tstamp: Timestamp,
+    val guid: UUID
+)
+
+data class Thingy2(
+    val id: UUID,
+    val name: String?,
+    val integer: Int?,
+    val double: Double?,
+    val tstamp: Timestamp?,
+    val guid: UUID?
+)
 
 object Entities {
     val thingy1 = Entity(
@@ -67,7 +82,14 @@ class DBTest {
             runDB(dbConfig) { db ->
                 db.initThingies()
                 db.connect { cx ->
-                    val inT = Thingy1(UUID.randomUUID(), "thing-1", 42, 6.023e23, Timestamp.from(Instant.now()), UUID.randomUUID())
+                    val inT = Thingy1(
+                        UUID.randomUUID(),
+                        "thing-1",
+                        42,
+                        6.023e23,
+                        Timestamp.from(Instant.now()),
+                        UUID.randomUUID()
+                    )
                     cx.insert(Entities.thingy1, inT)
                     cx.unique<Thingy1>("""SELECT ${Entities.thingy1.projection()} FROM ${Entities.thingy1.tableName}""")!!
                         .also { outT ->
@@ -98,10 +120,15 @@ class DBTest {
                                 assertEquals(ts.normalize(), outT.tstamp.normalize())
                             }
                     }
+                    cx.list<Thingy1>("SELECT ${Entities.thingy1.projection()} FROM ${Entities.thingy1.tableName}")
+                        .also {
+                            assertEquals(1, it.size)
+                        }
                 }
             }
         }
     }
+
     @Test
     fun testNull() {
         val hikariConfig = HikariConfig().apply {
@@ -120,12 +147,39 @@ class DBTest {
             runDB(dbConfig) { db ->
                 db.initThingies()
                 db.connect { cx ->
-                    val inT = Thingy2(UUID.randomUUID(), null, null, null, null, null)
+                    val id = UUID.randomUUID()
+                    val inT = Thingy2(id, null, null, null, null, null)
                     cx.insert(Entities.thingy2, inT)
-                    cx.unique<Thingy2>("""SELECT ${Entities.thingy2.projection()} FROM ${Entities.thingy2.tableName}""")!!
+                    cx.unique<Thingy2>("SELECT ${Entities.thingy2.projection()} FROM ${Entities.thingy2.tableName}")!!
                         .also { outT ->
                             assertEquals(inT, outT)
                         }
+                    cx.list<Thingy2>("SELECT ${Entities.thingy1.projection()} FROM ${Entities.thingy1.tableName}")
+                        .also {
+                            assertEquals(1, it.size)
+                        }
+                    cx.list<Thingy2>(
+                        """SELECT ${Entities.thingy1.projection()}
+                          |  FROM ${Entities.thingy1.tableName}
+                          | WHERE id = ?""".trimMargin()
+                    ) {
+                        addObject(id)
+                    }.also {
+                        assertEquals(1, it.size)
+                    }
+                    cx.count("SELECT COUNT(*) FROM ${Entities.thingy1.tableName}")
+                        .also {
+                            assertEquals(1, it)
+                        }
+                    cx.count(
+                        """SELECT COUNT(*)
+                          |  FROM ${Entities.thingy1.tableName}
+                          | WHERE id = ?""".trimMargin()
+                    ) {
+                        addObject(id)
+                    }.also {
+                        assertEquals(1, it)
+                    }
                 }
             }
         }
