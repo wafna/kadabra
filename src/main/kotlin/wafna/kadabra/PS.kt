@@ -15,13 +15,8 @@ import kotlin.reflect.jvm.jvmName
 
 /**
  * Converts a collection to a map by applying a key generating function to each element.
- * Does not check for collisions.
+ * Fails on key collisions.
  */
-fun <T : Any, R : Any> Collection<T>.toMap(key: (T) -> R): Map<R, T> = fold(TreeMap<R, T>()) { map, elem ->
-    map[key(elem)] = elem
-    map
-}
-
 fun <T : Any, R : Any> Collection<T>.toMapStrict(key: (T) -> R): Map<R, T> = fold(TreeMap<R, T>()) { map, elem ->
     val k = key(elem)
     if (map.containsKey(k))
@@ -285,24 +280,25 @@ fun Connection.update(sql: String, params: (Params.() -> Unit)): Int =
  * @param columnType used when writing a null.
  */
 @PublishedApi
-internal abstract class FieldWriter<R : Any>(private val prop: KProperty1<R, *>, private val columnType: Int) {
+internal abstract class FieldWriter<R, T : Any>(private val prop: KProperty1<R, *>, private val columnType: Int) {
 
     /**
      * Strategy for writing a type appropriate value or a null.
      */
     fun write(record: R, ps: PreparedStatement, pos: Int) {
         val value = prop.get(record)
+        @Suppress("UNCHECKED_CAST")
         if (value == null)
             ps.setNull(pos, columnType)
         else
-            writeValue(ps, pos, value)
+            writeValue(ps, pos, value as T)
     }
 
     /**
      * Implement this by setting the value into the prepared statement in a type appropriate way,
      * i.e. by casting the value.
      */
-    protected abstract fun writeValue(ps: PreparedStatement, pos: Int, value: Any)
+    protected abstract fun writeValue(ps: PreparedStatement, pos: Int, value: T)
 }
 
 /**
@@ -331,37 +327,37 @@ fun <T : Any> Connection.insert(
     require(columns.isNotEmpty()) { "No columns are declared." }
 
     val props: Collection<KProperty1<T, *>> = kClass.declaredMemberProperties
-    val propNames = props.toMap { it.name }
+    val propNames = props.toMapStrict { it.name }
 
     val width = columns.size
     require(width == props.size) {
         "Size of declared fields (${columns.joinToString()}) does not match the record size (${props.size}) in ${kClass.qualifiedName}"
     }
 
-    val writes: Collection<FieldWriter<T>> = columns.map { column ->
+    val writes: List<FieldWriter<T, out Any>> = columns.map { column ->
         val prop: KProperty1<T, *> = propNames[column.second]
             ?: throw RuntimeException("Unknown property ${column.second} on ${kClass.qualifiedName}")
         when (prop.returnType.toString()) {
             "kotlin.String" ->
-                object : FieldWriter<T>(prop, Types.VARCHAR) {
-                    override fun writeValue(ps: PreparedStatement, pos: Int, value: Any) =
-                        ps.setString(pos, value as String)
+                object : FieldWriter<T, String>(prop, Types.VARCHAR) {
+                    override fun writeValue(ps: PreparedStatement, pos: Int, value: String) =
+                        ps.setString(pos, value)
                 }
 
             java.lang.Integer::class.java.canonicalName ->
-                object : FieldWriter<T>(prop, Types.INTEGER) {
-                    override fun writeValue(ps: PreparedStatement, pos: Int, value: Any) =
-                        ps.setInt(pos, value as Int)
+                object : FieldWriter<T, Int>(prop, Types.INTEGER) {
+                    override fun writeValue(ps: PreparedStatement, pos: Int, value: Int) =
+                        ps.setInt(pos, value)
                 }
 
             java.lang.Double::class.java.canonicalName ->
-                object : FieldWriter<T>(prop, Types.DOUBLE) {
-                    override fun writeValue(ps: PreparedStatement, pos: Int, value: Any) =
-                        ps.setDouble(pos, value as Double)
+                object : FieldWriter<T, Double>(prop, Types.DOUBLE) {
+                    override fun writeValue(ps: PreparedStatement, pos: Int, value: Double) =
+                        ps.setDouble(pos, value)
                 }
 
             else ->
-                object : FieldWriter<T>(prop, Types.JAVA_OBJECT) {
+                object : FieldWriter<T, Any>(prop, Types.JAVA_OBJECT) {
                     override fun writeValue(ps: PreparedStatement, pos: Int, value: Any) =
                         ps.setObject(pos, value)
                 }

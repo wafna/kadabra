@@ -10,19 +10,19 @@ import kotlin.test.assertEquals
 import kotlin.time.Duration.Companion.hours
 import kotlin.time.Duration.Companion.milliseconds
 
-data class Thingy1(val id: UUID, val name: String, val integer: Int, val double: Double, val tstamp: Timestamp)
-data class Thingy2(val id: UUID, val name: String?, val integer: Int?, val double: Double?, val tstamp: Timestamp?)
+data class Thingy1(val id: UUID, val name: String, val integer: Int, val double: Double, val tstamp: Timestamp, val guid: UUID)
+data class Thingy2(val id: UUID, val name: String?, val integer: Int?, val double: Double?, val tstamp: Timestamp?, val guid: UUID?)
 
 object Entities {
     val thingy1 = Entity(
         tableName = "thingy",
-        columnNames = listOf("id", "name", "integer", "double", "tstamp"),
-        fieldNames = listOf("id", "name", "integer", "double", "tstamp")
+        columnNames = listOf("id", "name", "integer", "double", "tstamp", "guid"),
+        fieldNames = listOf("id", "name", "integer", "double", "tstamp", "guid")
     )
     val thingy2 = Entity(
         tableName = "thingy",
-        columnNames = listOf("id", "name", "integer", "double", "tstamp"),
-        fieldNames = listOf("id", "name", "integer", "double", "tstamp")
+        columnNames = listOf("id", "name", "integer", "double", "tstamp", "guid"),
+        fieldNames = listOf("id", "name", "integer", "double", "tstamp", "guid")
     )
 }
 
@@ -36,7 +36,8 @@ suspend fun DB.initThingies() {
                             name VARCHAR(32),
                             integer INTEGER,
                             double DOUBLE,
-                            tstamp TIMESTAMP
+                            tstamp TIMESTAMP,
+                            guid UUID
                             )"""
         )
     }
@@ -66,7 +67,7 @@ class DBTest {
             runDB(dbConfig) { db ->
                 db.initThingies()
                 db.connect { cx ->
-                    val inT = Thingy1(UUID.randomUUID(), "thing-1", 42, 6.023e23, Timestamp.from(Instant.now()))
+                    val inT = Thingy1(UUID.randomUUID(), "thing-1", 42, 6.023e23, Timestamp.from(Instant.now()), UUID.randomUUID())
                     cx.insert(Entities.thingy1, inT)
                     cx.unique<Thingy1>("""SELECT ${Entities.thingy1.projection()} FROM ${Entities.thingy1.tableName}""")!!
                         .also { outT ->
@@ -119,8 +120,8 @@ class DBTest {
             runDB(dbConfig) { db ->
                 db.initThingies()
                 db.connect { cx ->
-                    val inT = Thingy2(UUID.randomUUID(), null, null, null, null)
-                    cx.insert(Entities.thingy1, inT)
+                    val inT = Thingy2(UUID.randomUUID(), null, null, null, null, null)
+                    cx.insert(Entities.thingy2, inT)
                     cx.unique<Thingy2>("""SELECT ${Entities.thingy2.projection()} FROM ${Entities.thingy2.tableName}""")!!
                         .also { outT ->
                             assertEquals(inT, outT)
