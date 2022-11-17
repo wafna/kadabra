@@ -4,7 +4,6 @@ import java.lang.reflect.Constructor
 import java.lang.reflect.Parameter
 import java.math.BigDecimal
 import java.sql.*
-import java.time.Instant
 import java.util.*
 import kotlin.reflect.KClass
 import kotlin.reflect.KProperty1
@@ -20,7 +19,7 @@ import kotlin.reflect.jvm.jvmName
 fun <T : Any, R : Any> Collection<T>.toMapStrict(key: (T) -> R): Map<R, T> = fold(TreeMap<R, T>()) { map, elem ->
     val k = key(elem)
     if (map.containsKey(k))
-        throw RuntimeException("Duplicate key: $k")
+        throw DBException("Duplicate key: $k")
     map[k] = elem
     map
 }
@@ -60,12 +59,8 @@ val Double.sql: SQLParam
     get() = { ps, position -> ps.setDouble(position, this) }
 val String.sql: SQLParam
     get() = { ps, position -> ps.setString(position, this) }
-val Instant.sql: SQLParam
-    get() = { ps, position -> ps.setDate(position, java.sql.Date(this.toEpochMilli())) }
 val Timestamp.sql: SQLParam
     get() = { ps, position -> ps.setTimestamp(position, this) }
-val BigDecimal.sql: SQLParam
-    get() = { ps, position -> ps.setBigDecimal(position, this) }
 val Any.sql: SQLParam
     get() = { ps, position -> ps.setObject(position, this) }
 
@@ -77,19 +72,12 @@ class Params {
 
     fun array(): Array<SQLParam> = params.toTypedArray()
 
-    fun add(param: SQLParam) = params.add(param)
-    fun add(params: Collection<SQLParam>) = params.forEach(::add)
+    fun add(vararg ps: SQLParam) = ps.forEach { params.add(it) }
 
     fun addInt(p: Int) = params.add(p.sql)
     fun addDouble(p: Double) = params.add(p.sql)
-    fun addString(p: String) = params.add(p.sql)
-    fun addStrings(ps: Collection<String>) = ps.forEach { params.add(it.sql) }
     fun addStrings(vararg ps: String) = ps.forEach { params.add(it.sql) }
-    fun addBigDecimal(p: BigDecimal) = params.add(p.sql)
-
-    // fun addBigDecimals(ps: Collection<BigDecimal>) = ps.forEach { params.add(it.sql) }
     fun addTimestamp(p: Timestamp) = params.add(p.sql)
-    fun addTimestamp(p: Instant) = params.add(Timestamp(p.toEpochMilli()).sql)
     fun addObject(p: Any) = params.add(p.sql)
 }
 
@@ -130,38 +118,39 @@ internal fun <T : Any> makeReadRecord(kClass: KClass<T>): RecordReader<T> {
     val params = ctor.parameters!!
     val fields: List<FieldReader> = params.withIndex().map { ctorParam ->
         val columnIndex = 1 + ctorParam.index
-        when (ctorParam.value.type) {
+        val paramType = ctorParam.value.type
+        fun <T> decorate(g: () -> T): T = try {
+            g()
+        } catch (e: Throwable) {
+            throw DBException("Cannot get parameter of type $paramType at position $columnIndex for $kClass", e)
+        }
+        when (paramType) {
             java.lang.Character::class.java -> { rs ->
-                rs.getString(columnIndex).let {
-////                        // Fudge for Oracle
-////                        if (it.isEmpty()) null
-//                        else it[0]
-                    it[0]
-                }.let {
-                    if (rs.wasNull()) null else it
+                decorate { rs.getString(columnIndex) }.let {
+                    if (rs.wasNull()) null else it[0]
                 }
             }
 
             java.lang.String::class.java -> { rs ->
-                rs.getString(columnIndex).let {
+                decorate { rs.getString(columnIndex) }?.let {
                     if (rs.wasNull()) null else it
                 }
             }
 
             java.lang.Integer::class.java -> { rs ->
-                rs.getInt(columnIndex).let {
+                decorate { rs.getInt(columnIndex) }.let {
                     if (rs.wasNull()) null else it
                 }
             }
 
             java.lang.Double::class.java -> { rs ->
-                rs.getDouble(columnIndex).let {
+                decorate { rs.getDouble(columnIndex) }.let {
                     if (rs.wasNull()) null else it
                 }
             }
             // Punt.
             else -> { rs ->
-                rs.getObject(columnIndex).let {
+                decorate { rs.getObject(columnIndex) }?.let {
                     if (rs.wasNull()) null else it
                 }
             }
@@ -256,7 +245,7 @@ internal fun <T : Any> ResultSet.readRecord(recordReader: RecordReader<T>): T {
             }""".trimMargin(), e
         )
     } catch (e: Throwable) {
-        throw RuntimeException("Failed to read record: ${args.joinToString()}", e)
+        throw DBException("Failed to read record: ${args.joinToString()}", e)
     }
 }
 
@@ -287,11 +276,12 @@ internal abstract class FieldWriter<R, T : Any>(private val prop: KProperty1<R, 
      */
     fun write(record: R, ps: PreparedStatement, pos: Int) {
         val value = prop.get(record)
-        @Suppress("UNCHECKED_CAST")
-        if (value == null)
+        if (value == null) {
             ps.setNull(pos, columnType)
-        else
+        } else {
+            @Suppress("UNCHECKED_CAST")
             writeValue(ps, pos, value as T)
+        }
     }
 
     /**
@@ -313,12 +303,12 @@ inline fun <reified T : Any> Connection.insert(entity: Entity, record: T): Int =
  */
 @Throws(SQLException::class, DBException::class)
 @PublishedApi
-internal fun <T : Any> Connection.insert(
-    kClass: KClass<T>, table: String, columns: Collection<Pair<String, String>>, record: T
+internal fun <R : Any> Connection.insert(
+    kClass: KClass<R>, table: String, columns: Collection<Pair<String, String>>, record: R
 ): Int {
     require(columns.isNotEmpty()) { "No columns are declared." }
 
-    val props: Collection<KProperty1<T, *>> = kClass.declaredMemberProperties
+    val props: Collection<KProperty1<R, *>> = kClass.declaredMemberProperties
     val propNames = props.toMapStrict { it.name }
 
     val width = columns.size
@@ -326,30 +316,30 @@ internal fun <T : Any> Connection.insert(
         "Size of declared fields (${columns.joinToString()}) does not match the record size (${props.size}) in ${kClass.qualifiedName}"
     }
 
-    val writes: List<FieldWriter<T, out Any>> = columns.map { column ->
-        val prop: KProperty1<T, *> = propNames[column.second]
-            ?: throw RuntimeException("Unknown property ${column.second} on ${kClass.qualifiedName}")
+    val writes: List<FieldWriter<R, out Any>> = columns.map { column ->
+        val prop: KProperty1<R, *> = propNames[column.second]
+            ?: throw DBException("Unknown property ${column.second} on ${kClass.qualifiedName}")
         when (prop.returnType.toString()) {
             "kotlin.String" ->
-                object : FieldWriter<T, String>(prop, Types.VARCHAR) {
+                object : FieldWriter<R, String>(prop, Types.VARCHAR) {
                     override fun writeValue(ps: PreparedStatement, pos: Int, value: String) =
                         ps.setString(pos, value)
                 }
 
             java.lang.Integer::class.java.canonicalName ->
-                object : FieldWriter<T, Int>(prop, Types.INTEGER) {
+                object : FieldWriter<R, Int>(prop, Types.INTEGER) {
                     override fun writeValue(ps: PreparedStatement, pos: Int, value: Int) =
                         ps.setInt(pos, value)
                 }
 
             java.lang.Double::class.java.canonicalName ->
-                object : FieldWriter<T, Double>(prop, Types.DOUBLE) {
+                object : FieldWriter<R, Double>(prop, Types.DOUBLE) {
                     override fun writeValue(ps: PreparedStatement, pos: Int, value: Double) =
                         ps.setDouble(pos, value)
                 }
 
             else ->
-                object : FieldWriter<T, Any>(prop, Types.JAVA_OBJECT) {
+                object : FieldWriter<R, Any>(prop, Types.JAVA_OBJECT) {
                     override fun writeValue(ps: PreparedStatement, pos: Int, value: Any) =
                         ps.setObject(pos, value)
                 }
