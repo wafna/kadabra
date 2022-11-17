@@ -2,7 +2,6 @@ package wafna.kadabra
 
 import java.lang.reflect.Constructor
 import java.lang.reflect.Parameter
-import java.math.BigDecimal
 import java.sql.*
 import java.util.*
 import kotlin.reflect.KClass
@@ -159,88 +158,22 @@ internal fun <T : Any> makeReadRecord(kClass: KClass<T>): RecordReader<T> {
     return RecordReader(ctor, fields)
 }
 
-// Nulls are a separate case.
-typealias Coercion = (Any) -> Any
-
-///**
-// * Maps DB type to field type to coercion.
-// */
-//private val fromSQL = mapOf<String, Map<String, Coercion>>(
-//    "boolean" to mapOf(
-//        BigDecimal::class.java.canonicalName to { t ->
-//            (t as BigDecimal).let {
-//                0 != it.compareTo(BigDecimal.ZERO)
-//            }
-//        }
-//    )
-//)
-//
-//private fun coerce(param: Parameter, arg: Any?): Any? =
-//    when (arg) {
-//        null -> null
-//        else -> {
-//            val sqlType = param.type.canonicalName
-//            val fieldType = arg::class.java.canonicalName
-//            fromSQL[sqlType]?.get(fieldType)?.let { it(arg) } ?: arg
-//        }
-//    }
-//
-private val coerce = object {
-    private val fromSQL = mapOf<String, Map<String, Coercion>>(
-        "boolean" to mapOf(
-            BigDecimal::class.java.canonicalName to { t ->
-                (t as BigDecimal).let {
-                    0 != it.compareTo(BigDecimal.ZERO)
-                }
-            }
-        )
-    )
-
-    /**
-     * Coerce a value to its corresponding parameter type.
-     *
-     * @param param Description of the parameter of the object constructor.
-     * @param arg The value to be given to the constructor.
-     */
-    fun param(param: Parameter, arg: Any?): Any? =
-        when (arg) {
-            null -> null
-            else -> {
-                val sqlType = param.type.canonicalName
-                val fieldType = arg::class.java.canonicalName
-                fromSQL[sqlType]?.get(fieldType)?.let { it(arg) } ?: arg
-            }
-        }
-
-    /**
-     * Coerce a bunch of values to their corresponding parameter types.
-     */
-    fun params(parameters: Array<Parameter>, args: Collection<Any?>): Array<Any?> {
-        require(parameters.size == args.size)
-        return parameters.zip(args).map { pair ->
-            param(pair.first, pair.second)
-        }.toTypedArray()
-    }
-}
-
 @PublishedApi
 @Throws(DBException::class)
 internal fun <T : Any> ResultSet.readRecord(recordReader: RecordReader<T>): T {
     val args: List<Any?> = recordReader.fields.map { it(this) }
     val parameters: Array<Parameter> = recordReader.ctor.parameters
     require(args.size == parameters.size)
-    val coerced = coerce.params(parameters, args)
     try {
-        return recordReader.ctor.newInstance(* coerced)
+        return recordReader.ctor.newInstance(* args.toTypedArray())
     } catch (e: java.lang.IllegalArgumentException) {
         throw DBException(
             """Could not match constructor ${recordReader.ctor.name} with arguments: 
               |${
-                parameters.zip(coerced).withIndex().joinToString("") { q ->
+                parameters.zip(args).withIndex().joinToString("") { q ->
                     val p: Parameter = q.value.first
                     val v: Any? = q.value.second
-                    "\n   ${p.name} : ${p.type} = ${if (null == v) "null" else "[${v::class.qualifiedName}] $v"} " +
-                            "<< ${coerced[q.index].let { "$it as ${it?.javaClass?.canonicalName ?: "NULL"}" }} >>"
+                    "\n   ${p.name} : ${p.type} = ${if (null == v) "null" else "[${v::class.qualifiedName}] $v"}"
                 }
             }""".trimMargin(), e
         )
