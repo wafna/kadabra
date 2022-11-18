@@ -27,7 +27,7 @@ private fun <T : Any, R : Any> Collection<T>.toMapStrict(key: (T) -> R): Map<R, 
 class DBException(message: String, cause: Throwable? = null) : Exception(message, cause)
 
 /**
- * Information needed to map on object into and out of a database.
+ * Information needed to map an object into and out of a database.
  */
 open class Entity(val tableName: String, val columnNames: List<String>, val fieldNames: List<String>) {
     /**
