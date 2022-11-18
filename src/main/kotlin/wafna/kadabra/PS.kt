@@ -211,7 +211,11 @@ internal abstract class FieldWriter<R, T : Any>(private val prop: KProperty1<R, 
     fun write(record: R, ps: PreparedStatement, pos: Int) {
         val value = prop.get(record)
         if (value == null) {
-            ps.setNull(pos, columnType)
+            try {
+                ps.setNull(pos, columnType)
+            } catch (e: Throwable) {
+                throw DBException("Cannot set NULL with column type $columnType at position $pos.")
+            }
         } else {
             @Suppress("UNCHECKED_CAST")
             writeValue(ps, pos, value as T)
@@ -253,8 +257,8 @@ internal fun <R : Any> Connection.insert(
     val writes: List<FieldWriter<R, out Any>> = columns.map { column ->
         val prop: KProperty1<R, *> = propNames[column.second]
             ?: throw DBException("Unknown property ${column.second} on ${kClass.qualifiedName}")
-        when (prop.returnType.toString()) {
-            "kotlin.String" ->
+        when (prop.returnType.javaClass.canonicalName) {
+            java.lang.String::class.java.canonicalName ->
                 object : FieldWriter<R, String>(prop, Types.VARCHAR) {
                     override fun writeValue(ps: PreparedStatement, pos: Int, value: String) =
                         ps.setString(pos, value)
