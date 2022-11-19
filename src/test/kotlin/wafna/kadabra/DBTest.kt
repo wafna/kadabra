@@ -174,7 +174,7 @@ class DBTest {
                         addDouble(inT.double)
                         addStrings(inT.name)
                         addObject(inT.guid)
-                        addObject(inT.bigDecimal)
+                        addBigDecimal(inT.bigDecimal)
                     }!!.also { outT ->
                         assertEquals(inT.normalize(), outT.normalize())
                     }
@@ -187,6 +187,14 @@ class DBTest {
                             .also { outT ->
                                 assertEquals(ts.normalize(), outT.tstamp.normalize())
                             }
+                    }
+                    cx.count(
+                        """SELECT COUNT(*) 
+                          |  FROM ${Entities.thingy.tableName} WHERE guid = ?""".trimMargin()
+                    ) {
+                        addObject(inT.guid)
+                    }.also {
+                        assertEquals(1, it)
                     }
                     cx.list<Thingy1>("SELECT ${Entities.thingy.projection()} FROM ${Entities.thingy.tableName}")
                         .also {
@@ -215,7 +223,6 @@ class DBTest {
             runDB(dbConfig) { db ->
                 db.initThingies()
                 db.connect { cx ->
-                    val id = UUID.randomUUID()
                     val inT = Thingy2(null, null, null, null, null, null, null)
                     cx.insert(Entities.thingy, inT)
                     cx.unique<Thingy2>("SELECT ${Entities.thingy.projection()} FROM ${Entities.thingy.tableName}")!!

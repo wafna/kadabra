@@ -84,6 +84,7 @@ class Params {
     fun addDouble(p: Double) = params.add(p.sql)
     fun addStrings(vararg ps: String) = ps.forEach { params.add(it.sql) }
     fun addTimestamp(p: Timestamp) = params.add(p.sql)
+    fun addBigDecimal(p: BigDecimal) = params.add(p.sql)
     fun addObject(p: Any) = params.add(p.sql)
 }
 
