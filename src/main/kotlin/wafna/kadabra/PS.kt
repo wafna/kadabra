@@ -97,7 +97,21 @@ fun PreparedStatement.setParams(params: Params): PreparedStatement = also {
  * Gets a value from a record set at a position, which position is held in a closure.
  * We don't care what comes back because it will be reflected into the constructor and the JVM will sort it out.
  */
-private typealias FieldReader = (resultSet: ResultSet) -> Any?
+//private typealias FieldReader = (resultSet: ResultSet) -> Any?
+
+internal abstract class FieldReader(private val columnIndex: Int) {
+    fun read(resultSet: ResultSet): Any? {
+        try {
+            return readField(resultSet)?.let {
+                if (resultSet.wasNull()) null else it
+            }
+        } catch (e: Throwable) {
+            throw DBException("Cannot get parameter at position $columnIndex.", e)
+        }
+    }
+
+    protected abstract fun readField(resultSet: ResultSet): Any?
+}
 
 /**
  * Everything needed to create a T from a ResultSet.
@@ -120,48 +134,41 @@ private fun <T : Any> makeRecordReader(kClass: KClass<T>): RecordReader<T> {
 private fun makeFieldReader(
     param: KParameter,
     columnIndex: Int
-): (resultSet: ResultSet) -> Any? {
-    fun <T> decorate(g: () -> T): T = try {
-        g()
-    } catch (e: Throwable) {
-        throw DBException("Cannot get parameter of type $param at position $columnIndex.", e)
-    }
+): FieldReader {
     return when (param) {
-        String::class -> { rs ->
-            decorate { rs.getString(columnIndex) }?.let {
-                if (rs.wasNull()) null else it
-            }
+        String::class -> object : FieldReader(columnIndex) {
+            override fun readField(resultSet: ResultSet): Any? =
+                resultSet.getString(columnIndex)
         }
 
-        Integer::class -> { rs ->
-            decorate { rs.getInt(columnIndex) }.let {
-                if (rs.wasNull()) null else it
-            }
+        Integer::class -> object : FieldReader(columnIndex) {
+            override fun readField(resultSet: ResultSet): Any =
+                resultSet.getInt(columnIndex)
         }
 
-        Long::class -> { rs ->
-            decorate { rs.getLong(columnIndex) }.let {
-                if (rs.wasNull()) null else it
-            }
+        Long::class -> object : FieldReader(columnIndex) {
+            override fun readField(resultSet: ResultSet): Any =
+                resultSet.getLong(columnIndex)
         }
 
-        Double::class -> { rs ->
-            decorate { rs.getDouble(columnIndex) }.let {
-                if (rs.wasNull()) null else it
-            }
+        Double::class -> object : FieldReader(columnIndex) {
+            override fun readField(resultSet: ResultSet): Any =
+                resultSet.getDouble(columnIndex)
         }
 
-        BigDecimal::class -> { rs ->
-            decorate { rs.getBigDecimal(columnIndex) }?.let {
-                if (rs.wasNull()) null else it
-            }
+        BigDecimal::class -> object : FieldReader(columnIndex) {
+            override fun readField(resultSet: ResultSet): Any? =
+                resultSet.getBigDecimal(columnIndex)
         }
 
-        // Punt.
-        else -> { rs ->
-            decorate { rs.getObject(columnIndex) }?.let {
-                if (rs.wasNull()) null else it
-            }
+        Timestamp::class -> object : FieldReader(columnIndex) {
+            override fun readField(resultSet: ResultSet): Any? =
+                resultSet.getTimestamp(columnIndex)
+        }
+
+        else -> object : FieldReader(columnIndex) {
+            override fun readField(resultSet: ResultSet): Any? =
+                resultSet.getObject(columnIndex)
         }
     }
 }
@@ -169,7 +176,7 @@ private fun makeFieldReader(
 @PublishedApi
 @Throws(DBException::class)
 internal fun <T : Any> ResultSet.readRecord(recordReader: RecordReader<T>): T {
-    val args: List<Any?> = recordReader.fields.map { it(this) }
+    val args: List<Any?> = recordReader.fields.map { it.read(this) }
     try {
         return recordReader.ctor.call(* args.toTypedArray())
     } catch (e: java.lang.IllegalArgumentException) {
@@ -254,35 +261,40 @@ internal fun <R : Any> Connection.insert(
         val prop: KProperty1<R, *> = propNames[column.second]
             ?: throw DBException("Unknown property ${column.second} on ${kClass.qualifiedName}")
         when (prop.returnType.classifier) {
-            String::class ->
-                object : FieldWriter<R, String>(prop, Types.VARCHAR) {
-                    override fun writeValue(ps: PreparedStatement, pos: Int, value: String) =
-                        ps.setString(pos, value)
-                }
+            String::class -> object : FieldWriter<R, String>(prop, Types.VARCHAR) {
+                override fun writeValue(ps: PreparedStatement, pos: Int, value: String) =
+                    ps.setString(pos, value)
+            }
 
-            Integer::class ->
-                object : FieldWriter<R, Int>(prop, Types.INTEGER) {
-                    override fun writeValue(ps: PreparedStatement, pos: Int, value: Int) =
-                        ps.setInt(pos, value)
-                }
+            Integer::class -> object : FieldWriter<R, Int>(prop, Types.INTEGER) {
+                override fun writeValue(ps: PreparedStatement, pos: Int, value: Int) =
+                    ps.setInt(pos, value)
+            }
 
-            Long::class ->
-                object : FieldWriter<R, Long>(prop, Types.INTEGER) {
-                    override fun writeValue(ps: PreparedStatement, pos: Int, value: Long) =
-                        ps.setLong(pos, value)
-                }
+            Long::class -> object : FieldWriter<R, Long>(prop, Types.INTEGER) {
+                override fun writeValue(ps: PreparedStatement, pos: Int, value: Long) =
+                    ps.setLong(pos, value)
+            }
 
-            Double::class ->
-                object : FieldWriter<R, Double>(prop, Types.DOUBLE) {
-                    override fun writeValue(ps: PreparedStatement, pos: Int, value: Double) =
-                        ps.setDouble(pos, value)
-                }
+            Double::class -> object : FieldWriter<R, Double>(prop, Types.DOUBLE) {
+                override fun writeValue(ps: PreparedStatement, pos: Int, value: Double) =
+                    ps.setDouble(pos, value)
+            }
 
-            else ->
-                object : FieldWriter<R, Any>(prop, Types.JAVA_OBJECT) {
-                    override fun writeValue(ps: PreparedStatement, pos: Int, value: Any) =
-                        ps.setObject(pos, value)
-                }
+            BigDecimal::class -> object : FieldWriter<R, BigDecimal>(prop, Types.DOUBLE) {
+                override fun writeValue(ps: PreparedStatement, pos: Int, value: BigDecimal) =
+                    ps.setBigDecimal(pos, value)
+            }
+
+            Timestamp::class -> object : FieldWriter<R, Timestamp>(prop, Types.DOUBLE) {
+                override fun writeValue(ps: PreparedStatement, pos: Int, value: Timestamp) =
+                    ps.setTimestamp(pos, value)
+            }
+
+            else -> object : FieldWriter<R, Any>(prop, Types.JAVA_OBJECT) {
+                override fun writeValue(ps: PreparedStatement, pos: Int, value: Any) =
+                    ps.setObject(pos, value)
+            }
         }
     }
 
