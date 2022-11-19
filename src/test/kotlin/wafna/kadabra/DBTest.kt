@@ -15,49 +15,47 @@ import kotlin.time.Duration.Companion.hours
 import kotlin.time.Duration.Companion.milliseconds
 
 data class Thingy1(
-    val id: UUID,
     val name: String,
     val integer: Int,
+    val long: Long,
     val double: Double,
     val tstamp: Timestamp,
+    val bigDecimal: BigDecimal,
     val guid: UUID
 )
 
 data class Thingy2(
-    val id: UUID,
     val name: String?,
     val integer: Int?,
+    val long: Long?,
     val double: Double?,
     val tstamp: Timestamp?,
+    val bigDecimal: BigDecimal?,
     val guid: UUID?
 )
 
 object Entities {
-    val thingy1 = Entity(
+    val thingy = Entity(
         tableName = "thingy",
-        columnNames = listOf("id", "name", "integer", "double", "tstamp", "guid"),
-        fieldNames = listOf("id", "name", "integer", "double", "tstamp", "guid")
-    )
-    val thingy2 = Entity(
-        tableName = "thingy",
-        columnNames = listOf("id", "name", "integer", "double", "tstamp", "guid"),
-        fieldNames = listOf("id", "name", "integer", "double", "tstamp", "guid")
+        columnNames = listOf("name", "integer", "long", "double", "tstamp", "bigDecimal", "guid"),
+        fieldNames = listOf("name", "integer", "long", "double", "tstamp", "bigDecimal", "guid")
     )
 }
 
 // Create the schema for our testing database.
 suspend fun DB.initThingies() {
     connect { cx ->
-        cx.update("DROP TABLE IF EXISTS ${Entities.thingy1.tableName}")
+        cx.update("DROP TABLE IF EXISTS ${Entities.thingy.tableName}")
         cx.update(
-            """CREATE TABLE ${Entities.thingy1.tableName} (
-                            id UUID PRIMARY KEY,
-                            name VARCHAR(32),
-                            integer INTEGER,
-                            double DOUBLE,
-                            tstamp TIMESTAMP,
-                            guid UUID
-                            )"""
+            """CREATE TABLE ${Entities.thingy.tableName} (
+              |  name VARCHAR(32),
+              |  integer INTEGER,
+              |  long LONG,
+              |  double DOUBLE,
+              |  tstamp TIMESTAMP,
+              |  bigDecimal NUMERIC,
+              |  guid UUID
+              |)""".trimMargin()
         )
     }
 }
@@ -150,44 +148,47 @@ class DBTest {
                 db.initThingies()
                 db.connect { cx ->
                     val inT = Thingy1(
-                        UUID.randomUUID(),
                         "thing-1",
                         42,
+                        42L,
                         6.023e23,
                         Timestamp.from(Instant.now()),
+                        BigDecimal(42),
                         UUID.randomUUID()
                     )
-                    cx.insert(Entities.thingy1, inT)
-                    cx.unique<Thingy1>("""SELECT ${Entities.thingy1.projection()} FROM ${Entities.thingy1.tableName}""")!!
+                    cx.insert(Entities.thingy, inT)
+                    cx.unique<Thingy1>("""SELECT ${Entities.thingy.projection()} FROM ${Entities.thingy.tableName}""")!!
                         .also { outT ->
                             assertEquals(inT.normalize(), outT.normalize())
                         }
                     cx.unique<Thingy1>(
-                        """SELECT ${Entities.thingy1.projection()} 
-                          |  FROM ${Entities.thingy1.tableName}
+                        """SELECT ${Entities.thingy.projection()} 
+                          |  FROM ${Entities.thingy.tableName}
                           | WHERE integer = ?
                           |   AND double = ?
                           |   AND name = ?
-                          |   AND id = ?""".trimMargin()
+                          |   AND guid = ?
+                          |   AND bigDecimal = ?""".trimMargin()
                     ) {
                         addInt(inT.integer)
                         addDouble(inT.double)
                         addStrings(inT.name)
-                        addObject(inT.id)
+                        addObject(inT.guid)
+                        addObject(inT.bigDecimal)
                     }!!.also { outT ->
                         assertEquals(inT.normalize(), outT.normalize())
                     }
                     Timestamp.from(Instant.now().minusMillis(1.hours.inWholeMilliseconds)).also { ts ->
-                        cx.update("""UPDATE ${Entities.thingy1.tableName} SET tstamp = ? WHERE id = ?""") {
+                        cx.update("""UPDATE ${Entities.thingy.tableName} SET tstamp = ? WHERE guid = ?""") {
                             addTimestamp(ts)
-                            addObject(inT.id)
+                            addObject(inT.guid)
                         }
-                        cx.unique<Thingy1>("""SELECT ${Entities.thingy1.projection()} FROM ${Entities.thingy1.tableName}""")!!
+                        cx.unique<Thingy1>("""SELECT ${Entities.thingy.projection()} FROM ${Entities.thingy.tableName}""")!!
                             .also { outT ->
                                 assertEquals(ts.normalize(), outT.tstamp.normalize())
                             }
                     }
-                    cx.list<Thingy1>("SELECT ${Entities.thingy1.projection()} FROM ${Entities.thingy1.tableName}")
+                    cx.list<Thingy1>("SELECT ${Entities.thingy.projection()} FROM ${Entities.thingy.tableName}")
                         .also {
                             assertEquals(1, it.size)
                         }
@@ -215,36 +216,32 @@ class DBTest {
                 db.initThingies()
                 db.connect { cx ->
                     val id = UUID.randomUUID()
-                    val inT = Thingy2(id, null, null, null, null, null)
-                    cx.insert(Entities.thingy2, inT)
-                    cx.unique<Thingy2>("SELECT ${Entities.thingy2.projection()} FROM ${Entities.thingy2.tableName}")!!
+                    val inT = Thingy2(null, null, null, null, null, null, null)
+                    cx.insert(Entities.thingy, inT)
+                    cx.unique<Thingy2>("SELECT ${Entities.thingy.projection()} FROM ${Entities.thingy.tableName}")!!
                         .also { outT ->
                             assertEquals(inT, outT)
                         }
-                    cx.list<Thingy2>("SELECT ${Entities.thingy1.projection()} FROM ${Entities.thingy1.tableName}")
+                    cx.list<Thingy2>("SELECT ${Entities.thingy.projection()} FROM ${Entities.thingy.tableName}")
                         .also {
                             assertEquals(1, it.size)
                         }
                     cx.list<Thingy2>(
-                        """SELECT ${Entities.thingy1.projection()}
-                          |  FROM ${Entities.thingy1.tableName}
-                          | WHERE id = ?""".trimMargin()
-                    ) {
-                        addObject(id)
-                    }.also {
+                        """SELECT ${Entities.thingy.projection()}
+                          |  FROM ${Entities.thingy.tableName}
+                          | WHERE guid IS NULL""".trimMargin()
+                    ).also {
                         assertEquals(1, it.size)
                     }
-                    cx.count("SELECT COUNT(*) FROM ${Entities.thingy1.tableName}")
+                    cx.count("SELECT COUNT(*) FROM ${Entities.thingy.tableName}")
                         .also {
                             assertEquals(1, it)
                         }
                     cx.count(
                         """SELECT COUNT(*)
-                          |  FROM ${Entities.thingy1.tableName}
-                          | WHERE id = ?""".trimMargin()
-                    ) {
-                        addObject(id)
-                    }.also {
+                          |  FROM ${Entities.thingy.tableName}
+                          | WHERE guid IS NULL""".trimMargin()
+                    ).also {
                         assertEquals(1, it)
                     }
                 }

@@ -57,12 +57,16 @@ fun List<String>.project(): String = joinToString(", ")
 
 val Int.sql: SQLParam
     get() = { ps, position -> ps.setInt(position, this) }
+val Long.sql: SQLParam
+    get() = { ps, position -> ps.setLong(position, this) }
 val Double.sql: SQLParam
     get() = { ps, position -> ps.setDouble(position, this) }
 val String.sql: SQLParam
     get() = { ps, position -> ps.setString(position, this) }
 val Timestamp.sql: SQLParam
     get() = { ps, position -> ps.setTimestamp(position, this) }
+val BigDecimal.sql: SQLParam
+    get() = { ps, position -> ps.setBigDecimal(position, this) }
 val Any.sql: SQLParam
     get() = { ps, position -> ps.setObject(position, this) }
 
