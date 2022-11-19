@@ -2,11 +2,15 @@ package wafna.kadabra
 
 import com.zaxxer.hikari.HikariConfig
 import kotlinx.coroutines.runBlocking
+import java.math.BigDecimal
 import java.sql.Timestamp
 import java.time.Instant
 import java.util.*
-import kotlin.test.Test
-import kotlin.test.assertEquals
+import kotlin.reflect.KClass
+import kotlin.reflect.KParameter
+import kotlin.reflect.full.declaredMemberProperties
+import kotlin.reflect.full.primaryConstructor
+import kotlin.test.*
 import kotlin.time.Duration.Companion.hours
 import kotlin.time.Duration.Companion.milliseconds
 
@@ -64,6 +68,69 @@ fun Timestamp.normalize(): Timestamp = Timestamp.from(Instant.ofEpochMilli(time)
 fun Thingy1.normalize(): Thingy1 = copy(tstamp = tstamp.normalize())
 
 class DBTest {
+    /**
+     * Check that matching on return types of properties works as expected.
+     */
+    @Test
+    fun testWriteTypeMatching() {
+        data class Datum(
+            val propString: String,
+            val propStringQ: String?,
+            val propInt: Int,
+            val propIntQ: Int?,
+            val propLong: Long,
+            val propLongQ: Long?,
+            val propDouble: Double,
+            val propDoubleQ: Double?,
+            val propBigDecimal: BigDecimal,
+            val propTimestamp: Timestamp
+        )
+
+        val props = Datum::class.declaredMemberProperties
+        fun testProperty(propName: String, propClass: KClass<*>) {
+            val prop = props.firstOrNull { it.name == propName } ?: fail("Property $propName not found.")
+            assert(prop.returnType.classifier == propClass)
+        }
+        testProperty("propString", String::class)
+        testProperty("propStringQ", String::class)
+        testProperty("propInt", Int::class)
+        testProperty("propIntQ", Int::class)
+        testProperty("propLong", Long::class)
+        testProperty("propLongQ", Long::class)
+        testProperty("propDouble", Double::class)
+        testProperty("propDoubleQ", Double::class)
+        testProperty("propBigDecimal", BigDecimal::class)
+        testProperty("propTimestamp", Timestamp::class)
+    }
+
+    @Test
+    fun testReadTypeMatching() {
+        data class Datum(
+            val propString: String,
+            val propStringQ: String?,
+            val propInt: Int,
+            val propIntQ: Int?,
+            val propDouble: Double,
+            val propDoubleQ: Double?,
+            val propBigDecimal: BigDecimal,
+            val propTimestamp: Timestamp
+        )
+
+        val parameters: List<KParameter> = Datum::class.primaryConstructor!!.parameters
+        fun testProperty(propName: String, propClass: KClass<*>) {
+            val parameter = parameters.firstOrNull { it.name == propName } ?: fail("Parameter $propName not found.")
+            assert(parameter.type.classifier == propClass) { "${parameter.type.classifier} == $propClass" }
+        }
+        testProperty("propString", String::class)
+        testProperty("propStringQ", String::class)
+        testProperty("propInt", Int::class)
+        testProperty("propIntQ", Int::class)
+        testProperty("propDouble", Double::class)
+        testProperty("propDoubleQ", Double::class)
+        testProperty("propBigDecimal", BigDecimal::class)
+        testProperty("propTimestamp", Timestamp::class)
+    }
+
     @Test
     fun testNotNull() {
         val hikariConfig = HikariConfig().apply {

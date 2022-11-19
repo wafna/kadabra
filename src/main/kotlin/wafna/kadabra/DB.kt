@@ -13,6 +13,7 @@ import kotlin.time.Duration
 
 /**
  * For visibility into connection management and usage.
+ * The `id` correlates the events in the connection lifecycle.
  */
 interface DBListener : RetryListener {
     /**
@@ -66,6 +67,9 @@ data class DBConfig(
      * Minimum elapsed time between transactions.
      */
     val throttle: Duration,
+    /**
+     * Configuration for HikariDataSource.
+     */
     val hikariConfig: HikariConfig
 )
 
@@ -97,7 +101,6 @@ class DB private constructor(
     )
 
     private val throttle = Throttle(throttleDT)
-
     private val metricsRegistry = MetricRegistry()
     private val connectionWait: Timer = metricsRegistry.timer("connection-wait")
     private val connectionUse: Timer = metricsRegistry.timer("connection-use")

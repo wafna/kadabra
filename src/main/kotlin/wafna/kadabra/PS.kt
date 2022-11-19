@@ -1,11 +1,9 @@
 package wafna.kadabra
 
-import java.lang.reflect.Constructor
-import java.lang.reflect.Parameter
+import java.math.BigDecimal
 import java.sql.*
 import java.util.*
-import kotlin.reflect.KClass
-import kotlin.reflect.KProperty1
+import kotlin.reflect.*
 import kotlin.reflect.full.declaredMemberProperties
 import kotlin.reflect.full.primaryConstructor
 import kotlin.reflect.jvm.javaConstructor
@@ -99,85 +97,83 @@ fun PreparedStatement.setParams(params: Params): PreparedStatement = also {
  * Gets a value from a record set at a position, which position is held in a closure.
  * We don't care what comes back because it will be reflected into the constructor and the JVM will sort it out.
  */
-internal typealias FieldReader = (resultSet: ResultSet) -> Any?
+private typealias FieldReader = (resultSet: ResultSet) -> Any?
 
 /**
  * Everything needed to create a T from a ResultSet.
  */
-@PublishedApi
-internal data class RecordReader<T>(val ctor: Constructor<T>, val fields: List<FieldReader>)
+internal data class RecordReader<T>(val ctor: KFunction<T>, val fields: List<FieldReader>)
 
 /**
  * Provide a ReadRecord for a type T.
  */
-@PublishedApi
-internal fun <T : Any> makeReadRecord(kClass: KClass<T>): RecordReader<T> {
+private fun <T : Any> makeRecordReader(kClass: KClass<T>): RecordReader<T> {
 
-    val ctor: Constructor<T> = kClass.primaryConstructor!!.javaConstructor!!
-    require(ctor.trySetAccessible()) { "Primary constructor of ${kClass.jvmName} is inaccessible." }
-    val params = ctor.parameters!!
-    val fields: List<FieldReader> = params.withIndex().map { ctorParam ->
-        val columnIndex = 1 + ctorParam.index
-        val paramType = ctorParam.value.type
-        fun <T> decorate(g: () -> T): T = try {
-            g()
-        } catch (e: Throwable) {
-            throw DBException("Cannot get parameter of type $paramType at position $columnIndex for $kClass", e)
+    val ctor: KFunction<T> = kClass.primaryConstructor!!
+    require(ctor.javaConstructor!!.trySetAccessible()) { "Primary constructor of ${kClass.jvmName} is inaccessible." }
+    val fields: List<FieldReader> = ctor.parameters.withIndex().map { ctorParam ->
+        makeFieldReader(ctorParam.value, 1 + ctorParam.index)
+    }
+    return RecordReader(ctor, fields)
+}
+
+private fun makeFieldReader(
+    param: KParameter,
+    columnIndex: Int
+): (resultSet: ResultSet) -> Any? {
+    fun <T> decorate(g: () -> T): T = try {
+        g()
+    } catch (e: Throwable) {
+        throw DBException("Cannot get parameter of type $param at position $columnIndex.", e)
+    }
+    return when (param) {
+        String::class -> { rs ->
+            decorate { rs.getString(columnIndex) }?.let {
+                if (rs.wasNull()) null else it
+            }
         }
-        when (paramType) {
-            java.lang.Character::class.java -> { rs ->
-                decorate { rs.getString(columnIndex) }.let {
-                    if (rs.wasNull()) null else it[0]
-                }
-            }
 
-            java.lang.String::class.java -> { rs ->
-                decorate { rs.getString(columnIndex) }?.let {
-                    if (rs.wasNull()) null else it
-                }
+        Integer::class -> { rs ->
+            decorate { rs.getInt(columnIndex) }.let {
+                if (rs.wasNull()) null else it
             }
+        }
 
-            java.lang.Integer::class.java -> { rs ->
-                decorate { rs.getInt(columnIndex) }.let {
-                    if (rs.wasNull()) null else it
-                }
+        Long::class -> { rs ->
+            decorate { rs.getLong(columnIndex) }.let {
+                if (rs.wasNull()) null else it
             }
+        }
 
-            java.lang.Double::class.java -> { rs ->
-                decorate { rs.getDouble(columnIndex) }.let {
-                    if (rs.wasNull()) null else it
-                }
+        Double::class -> { rs ->
+            decorate { rs.getDouble(columnIndex) }.let {
+                if (rs.wasNull()) null else it
             }
-            // Punt.
-            else -> { rs ->
-                decorate { rs.getObject(columnIndex) }?.let {
-                    if (rs.wasNull()) null else it
-                }
+        }
+
+        BigDecimal::class -> { rs ->
+            decorate { rs.getBigDecimal(columnIndex) }?.let {
+                if (rs.wasNull()) null else it
+            }
+        }
+
+        // Punt.
+        else -> { rs ->
+            decorate { rs.getObject(columnIndex) }?.let {
+                if (rs.wasNull()) null else it
             }
         }
     }
-    return RecordReader(ctor, fields)
 }
 
 @PublishedApi
 @Throws(DBException::class)
 internal fun <T : Any> ResultSet.readRecord(recordReader: RecordReader<T>): T {
     val args: List<Any?> = recordReader.fields.map { it(this) }
-    val parameters: Array<Parameter> = recordReader.ctor.parameters
-    require(args.size == parameters.size)
     try {
-        return recordReader.ctor.newInstance(* args.toTypedArray())
+        return recordReader.ctor.call(* args.toTypedArray())
     } catch (e: java.lang.IllegalArgumentException) {
-        throw DBException(
-            """Could not match constructor ${recordReader.ctor.name} with arguments: 
-              |${
-                parameters.zip(args).withIndex().joinToString("") { q ->
-                    val p: Parameter = q.value.first
-                    val v: Any? = q.value.second
-                    "\n   ${p.name} : ${p.type} = ${if (null == v) "null" else "[${v::class.qualifiedName}] $v"}"
-                }
-            }""".trimMargin(), e
-        )
+        throw DBException("Could not match constructor ${recordReader.ctor.name} with arguments", e)
     } catch (e: Throwable) {
         throw DBException("Failed to read record: ${args.joinToString()}", e)
     }
@@ -257,20 +253,26 @@ internal fun <R : Any> Connection.insert(
     val writes: List<FieldWriter<R, out Any>> = columns.map { column ->
         val prop: KProperty1<R, *> = propNames[column.second]
             ?: throw DBException("Unknown property ${column.second} on ${kClass.qualifiedName}")
-        when (prop.returnType.javaClass.canonicalName) {
-            java.lang.String::class.java.canonicalName ->
+        when (prop.returnType.classifier) {
+            String::class ->
                 object : FieldWriter<R, String>(prop, Types.VARCHAR) {
                     override fun writeValue(ps: PreparedStatement, pos: Int, value: String) =
                         ps.setString(pos, value)
                 }
 
-            java.lang.Integer::class.java.canonicalName ->
+            Integer::class ->
                 object : FieldWriter<R, Int>(prop, Types.INTEGER) {
                     override fun writeValue(ps: PreparedStatement, pos: Int, value: Int) =
                         ps.setInt(pos, value)
                 }
 
-            java.lang.Double::class.java.canonicalName ->
+            Long::class ->
+                object : FieldWriter<R, Long>(prop, Types.INTEGER) {
+                    override fun writeValue(ps: PreparedStatement, pos: Int, value: Long) =
+                        ps.setLong(pos, value)
+                }
+
+            Double::class ->
                 object : FieldWriter<R, Double>(prop, Types.DOUBLE) {
                     override fun writeValue(ps: PreparedStatement, pos: Int, value: Double) =
                         ps.setDouble(pos, value)
@@ -346,7 +348,7 @@ internal fun <T : Any> Connection.unique(
     prepareStatement(sql).use { ps ->
         ps.setParams(* params).executeQuery().use { rs ->
             if (!rs.next()) return null
-            val recordClass = makeReadRecord(kClass)
+            val recordClass = makeRecordReader(kClass)
             val record = rs.readRecord(recordClass)
             if (rs.next()) throw DBException("Non-unique record set.")
             return record
@@ -373,7 +375,7 @@ internal fun <T : Any> Connection.list(
 ): List<T> {
     prepareStatement(sql).use { ps ->
         ps.setParams(* params).executeQuery().use { rs ->
-            val recordClass = makeReadRecord(kClass)
+            val recordClass = makeRecordReader(kClass)
             return LinkedList<T>().also { records ->
                 while (rs.next()) {
                     records.add(rs.readRecord(recordClass))
