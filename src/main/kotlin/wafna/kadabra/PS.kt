@@ -28,6 +28,10 @@ class DBException(message: String, cause: Throwable? = null) : Exception(message
  * Information needed to map an object into and out of a database.
  */
 open class Entity(val tableName: String, val columnNames: List<String>, val fieldNames: List<String>) {
+    init {
+        require(tableName.isNotEmpty())
+        require(columnNames.size == fieldNames.size)
+    }
     /**
      * All the columns (in order), qualified with `prefix`, in a comma separated list.
      * Useful for SELECT and INSERT.
