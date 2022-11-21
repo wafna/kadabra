@@ -49,19 +49,19 @@ fun List<String>.qualify(tableName: String): List<String> =
 
 fun List<String>.project(): String = joinToString(", ")
 
-// Turn values into params for prepared statements.
-
 /**
- * Sets a value, held in a closure, into the prepared statement at the indicated position.
+ * Holds a value to be set into a prepared statement in a type safe way.
+ * This is in lieu of yet more reflection and it makes explicit which types are supported.
  */
 abstract class SQLParam<T>(val value: T) {
-    abstract fun setParam(preparedStatement: PreparedStatement, position: Int): Unit
+    abstract fun setParam(preparedStatement: PreparedStatement, position: Int)
 }
 
 /**
  * Collection of parameters to prepared statements.
+ * Their positions in the prepared statement correspond to the order in which they were added.
  */
-class Params {
+class SQLParams {
     private val params = mutableListOf<SQLParam<*>>()
 
     fun array(): Array<SQLParam<*>> = params.toTypedArray()
@@ -119,14 +119,14 @@ class Params {
 /**
  * Interpolates positional parameters into a prepared statement.
  */
-fun PreparedStatement.setParams(vararg params: SQLParam<*>): PreparedStatement = also {
+private fun PreparedStatement.setParams(vararg params: SQLParam<*>): PreparedStatement = also {
     params.withIndex().forEach { it.value.setParam(this, 1 + it.index) }
 }
 
 /**
  * Interpolates positional parameters into a prepared statement.
  */
-fun PreparedStatement.setParams(params: Params): PreparedStatement = also {
+private fun PreparedStatement.setParams(params: SQLParams): PreparedStatement = also {
     params.array().withIndex().forEach { it.value.setParam(this, 1 + it.index) }
 }
 
@@ -232,16 +232,17 @@ internal fun <T : Any> ResultSet.readRecord(recordReader: RecordReader<T>): T {
  *
  * Note that insert gets special treatment, below, as well.
  */
-fun Connection.update(sql: String, vararg params: SQLParam<*>): Int =
-    prepareStatement(sql).use { it.setParams(* params).executeUpdate() }
+fun Connection.update(sql: String): Int =
+    prepareStatement(sql).use { it.executeUpdate() }
 
-fun Connection.update(sql: String, params: (Params.() -> Unit)): Int =
+fun Connection.update(sql: String, params: (SQLParams.() -> Unit)): Int =
     prepareStatement(sql).use {
-        it.setParams(Params().also { p -> p.params() }).executeUpdate()
+        it.setParams(SQLParams().also { p -> p.params() }).executeUpdate()
     }
 
 /**
  * Encapsulates the marshaling of a value from a record to a position in a prepared statement.
+ * This is for INSERT.
  * @param prop extracts the value from a record.
  * @param columnType used when writing a null.
  */
@@ -353,9 +354,9 @@ internal fun <R : Any> Connection.insert(
  * For SELECT COUNT statements that return a single record with a single integer column.
  */
 @Throws(SQLException::class, DBException::class)
-fun Connection.count(sql: String, block: Params.() -> Unit): Int =
+fun Connection.count(sql: String, configure: SQLParams.() -> Unit): Int =
     prepareStatement(sql).use { ps ->
-        countImpl(ps, Params().also { it.block() })
+        countImpl(ps, SQLParams().also { it.configure() })
     }
 
 /**
@@ -364,11 +365,11 @@ fun Connection.count(sql: String, block: Params.() -> Unit): Int =
 @Throws(SQLException::class, DBException::class)
 fun Connection.count(sql: String): Int =
     prepareStatement(sql).use { ps ->
-        countImpl(ps, Params())
+        countImpl(ps, SQLParams())
     }
 
-private fun countImpl(ps: PreparedStatement, it: Params): Int {
-    ps.setParams(it).executeQuery().use { rs ->
+private fun countImpl(ps: PreparedStatement, params: SQLParams): Int {
+    ps.setParams(params).executeQuery().use { rs ->
         if (1 != rs.metaData.columnCount) throw DBException("Single column expected for COUNT.")
         if (!rs.next()) throw DBException("No data in record set.")
         val count = rs.getInt(1)
@@ -382,8 +383,8 @@ private fun countImpl(ps: PreparedStatement, it: Params): Int {
  * If more than one record is returned then a `DBException` will be thrown.
  */
 @Throws(SQLException::class, DBException::class)
-inline fun <reified T : Any> Connection.unique(sql: String, params: (Params.() -> Unit)): T? =
-    unique(T::class, sql, Params().also { it.params() }.array())
+inline fun <reified T : Any> Connection.unique(sql: String, params: (SQLParams.() -> Unit)): T? =
+    unique(T::class, sql, SQLParams().also { it.params() }.array())
 
 @Throws(SQLException::class, DBException::class)
 inline fun <reified T : Any> Connection.unique(sql: String): T? =
@@ -409,8 +410,8 @@ internal fun <T : Any> Connection.unique(
 }
 
 @Throws(SQLException::class, DBException::class)
-inline fun <reified T : Any> Connection.list(sql: String, params: (Params.() -> Unit)): List<T> =
-    list(T::class, sql, Params().also { p -> p.params() }.array())
+inline fun <reified T : Any> Connection.list(sql: String, params: (SQLParams.() -> Unit)): List<T> =
+    list(T::class, sql, SQLParams().also { p -> p.params() }.array())
 
 @Throws(SQLException::class, DBException::class)
 inline fun <reified T : Any> Connection.list(sql: String): List<T> =
