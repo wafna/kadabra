@@ -165,22 +165,24 @@ class DBTest {
                         """SELECT ${Entities.thingy.projection()} 
                           |  FROM ${Entities.thingy.tableName}
                           | WHERE integer = ?
+                          |   AND long = ?
                           |   AND double = ?
                           |   AND name = ?
                           |   AND guid = ?
                           |   AND bigDecimal = ?""".trimMargin()
                     ) {
-                        addInt(inT.integer)
-                        addDouble(inT.double)
-                        addStrings(inT.name)
+                        add(inT.integer)
+                        add(inT.long)
+                        add(inT.double)
+                        add(inT.name)
                         addObject(inT.guid)
-                        addBigDecimal(inT.bigDecimal)
+                        add(inT.bigDecimal)
                     }!!.also { outT ->
                         assertEquals(inT.normalize(), outT.normalize())
                     }
                     Timestamp.from(Instant.now().minusMillis(1.hours.inWholeMilliseconds)).also { ts ->
                         cx.update("""UPDATE ${Entities.thingy.tableName} SET tstamp = ? WHERE guid = ?""") {
-                            addTimestamp(ts)
+                            add(ts)
                             addObject(inT.guid)
                         }
                         cx.unique<Thingy1>("""SELECT ${Entities.thingy.projection()} FROM ${Entities.thingy.tableName}""")!!
@@ -200,6 +202,14 @@ class DBTest {
                         .also {
                             assertEquals(1, it.size)
                         }
+                    cx.list<Thingy1>(
+                        """SELECT  ${Entities.thingy.projection()}
+                          |  FROM ${Entities.thingy.tableName} WHERE guid = ?""".trimMargin()
+                    ) {
+                        addObject(inT.guid)
+                    }.also {
+                        assertEquals(1, it.size)
+                    }
                 }
             }
         }

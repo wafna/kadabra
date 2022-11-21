@@ -79,15 +79,13 @@ class Params {
 
     fun array(): Array<SQLParam> = params.toTypedArray()
 
-    fun add(vararg ps: SQLParam) = ps.forEach { params.add(it) }
-
-    fun addInt(p: Int) = params.add(p.sql)
-    fun addLong(p: Long) = params.add(p.sql)
-    fun addDouble(p: Double) = params.add(p.sql)
-    fun addStrings(vararg ps: String) = ps.forEach { params.add(it.sql) }
-    fun addTimestamp(p: Timestamp) = params.add(p.sql)
-    fun addBigDecimal(p: BigDecimal) = params.add(p.sql)
-    fun addObject(p: Any) = params.add(p.sql)
+    fun add(vararg ps: Int) = ps.forEach { params.add(it.sql) }
+    fun add(vararg ps: Long) = ps.forEach { params.add(it.sql) }
+    fun add(vararg ps: Double) = ps.forEach { params.add(it.sql) }
+    fun add(vararg ps: String) = ps.forEach { params.add(it.sql) }
+    fun add(vararg ps: Timestamp) = ps.forEach { params.add(it.sql) }
+    fun add(vararg ps: BigDecimal) = ps.forEach { params.add(it.sql) }
+    fun addObject(vararg ps: Any) = ps.forEach { params.add(it.sql) }
 }
 
 /**
@@ -189,9 +187,10 @@ internal fun <T : Any> ResultSet.readRecord(recordReader: RecordReader<T>): T {
     try {
         return recordReader.ctor.call(* args.toTypedArray())
     } catch (e: java.lang.IllegalArgumentException) {
-        throw DBException("Could not match constructor ${recordReader.ctor.returnType} with arguments" +
-                recordReader.ctor.parameters.zip(args)
-                    .joinToString { "\n   ${it.first.name}: ${it.first.type} <- ${it.second?.let { v -> "${v::class.qualifiedName}" } ?: "null"}" },
+        throw DBException(
+            "Could not match constructor ${recordReader.ctor.returnType} with arguments" +
+                    recordReader.ctor.parameters.zip(args)
+                        .joinToString { "\n   ${it.first.name}: ${it.first.type} <- ${it.second?.let { v -> "${v::class.qualifiedName}" } ?: "null"}" },
             e
         )
     } catch (e: Throwable) {
