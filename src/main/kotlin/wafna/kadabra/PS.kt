@@ -88,7 +88,7 @@ class SQLParams(private val ps: PreparedStatement) {
 }
 
 /**
- * Gets a value from a record set at a position, which position is held in a closure.
+ * Gets a value from a record set at a position.
  * We don't care what comes back because it will be reflected into the constructor and the JVM will sort it out.
  */
 internal abstract class FieldReader(private val columnIndex: Int) {
