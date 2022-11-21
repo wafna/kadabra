@@ -206,7 +206,7 @@ class DBTest {
                         """SELECT  ${Entities.thingy.projection()}
                           |  FROM ${Entities.thingy.tableName} WHERE guid = ?""".trimMargin()
                     ) {
-                        addObject(inT.guid)
+                        add(inT.guid)
                     }.also {
                         assertEquals(1, it.size)
                     }

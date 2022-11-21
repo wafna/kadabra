@@ -82,13 +82,17 @@ class SQLParams(private val ps: PreparedStatement) {
         this.ps.setBigDecimal(next(), it)
     }
 
+    fun add(vararg ps: UUID) = ps.forEach {
+        this.ps.setObject(next(), it)
+    }
+
     fun addObject(vararg ps: Any) = ps.forEach {
         this.ps.setObject(next(), it)
     }
 }
 
 /**
- * Gets a value from a record set at a position.
+ * Gets a value from a result set at a position.
  * We don't care what comes back because it will be reflected into the constructor and the JVM will sort it out.
  */
 internal abstract class FieldReader(private val columnIndex: Int) {
