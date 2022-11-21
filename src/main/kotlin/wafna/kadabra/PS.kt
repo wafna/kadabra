@@ -95,6 +95,7 @@ internal abstract class FieldReader(private val columnIndex: Int) {
     fun read(resultSet: ResultSet): Any? {
         try {
             return readField(resultSet)?.let {
+                // Sometimes we get a default value (viz. primitives, unboxed values) for null.
                 if (resultSet.wasNull()) null else it
             }
         } catch (e: Throwable) {
