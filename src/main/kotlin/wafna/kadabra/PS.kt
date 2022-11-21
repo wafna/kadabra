@@ -41,11 +41,6 @@ open class Entity(val tableName: String, val columnNames: List<String>, val fiel
     val fieldMap = columnNames.zip(fieldNames)
 }
 
-/**
- * Sets a value, held in a closure, into the prepared statement at the indicated position.
- */
-typealias SQLParam = (preparedStatement: PreparedStatement, position: Int) -> Unit
-
 fun inList(size: Int): String = List(size) { "?" }.joinToString()
 fun inList(items: Collection<Any?>): String = inList(items.size)
 
@@ -56,50 +51,83 @@ fun List<String>.project(): String = joinToString(", ")
 
 // Turn values into params for prepared statements.
 
-val Int.sql: SQLParam
-    get() = { ps, position -> ps.setInt(position, this) }
-val Long.sql: SQLParam
-    get() = { ps, position -> ps.setLong(position, this) }
-val Double.sql: SQLParam
-    get() = { ps, position -> ps.setDouble(position, this) }
-val String.sql: SQLParam
-    get() = { ps, position -> ps.setString(position, this) }
-val Timestamp.sql: SQLParam
-    get() = { ps, position -> ps.setTimestamp(position, this) }
-val BigDecimal.sql: SQLParam
-    get() = { ps, position -> ps.setBigDecimal(position, this) }
-val Any.sql: SQLParam
-    get() = { ps, position -> ps.setObject(position, this) }
+/**
+ * Sets a value, held in a closure, into the prepared statement at the indicated position.
+ */
+abstract class SQLParam<T>(val value: T) {
+    abstract fun setParam(preparedStatement: PreparedStatement, position: Int): Unit
+}
 
 /**
  * Collection of parameters to prepared statements.
  */
 class Params {
-    private val params = mutableListOf<SQLParam>()
+    private val params = mutableListOf<SQLParam<*>>()
 
-    fun array(): Array<SQLParam> = params.toTypedArray()
+    fun array(): Array<SQLParam<*>> = params.toTypedArray()
 
-    fun add(vararg ps: Int) = ps.forEach { params.add(it.sql) }
-    fun add(vararg ps: Long) = ps.forEach { params.add(it.sql) }
-    fun add(vararg ps: Double) = ps.forEach { params.add(it.sql) }
-    fun add(vararg ps: String) = ps.forEach { params.add(it.sql) }
-    fun add(vararg ps: Timestamp) = ps.forEach { params.add(it.sql) }
-    fun add(vararg ps: BigDecimal) = ps.forEach { params.add(it.sql) }
-    fun addObject(vararg ps: Any) = ps.forEach { params.add(it.sql) }
+    fun add(vararg ps: Int) = ps.forEach {
+        params.add(object : SQLParam<Int>(it) {
+            override fun setParam(preparedStatement: PreparedStatement, position: Int): Unit =
+                preparedStatement.setInt(position, value)
+        })
+    }
+
+    fun add(vararg ps: Long) = ps.forEach {
+        params.add(object : SQLParam<Long>(it) {
+            override fun setParam(preparedStatement: PreparedStatement, position: Int): Unit =
+                preparedStatement.setLong(position, value)
+        })
+    }
+
+    fun add(vararg ps: Double) = ps.forEach {
+        params.add(object : SQLParam<Double>(it) {
+            override fun setParam(preparedStatement: PreparedStatement, position: Int): Unit =
+                preparedStatement.setDouble(position, value)
+        })
+    }
+
+    fun add(vararg ps: String) = ps.forEach {
+        params.add(object : SQLParam<String>(it) {
+            override fun setParam(preparedStatement: PreparedStatement, position: Int): Unit =
+                preparedStatement.setString(position, value)
+        })
+    }
+
+    fun add(vararg ps: Timestamp) = ps.forEach {
+        params.add(object : SQLParam<Timestamp>(it) {
+            override fun setParam(preparedStatement: PreparedStatement, position: Int): Unit =
+                preparedStatement.setTimestamp(position, value)
+        })
+    }
+
+    fun add(vararg ps: BigDecimal) = ps.forEach {
+        params.add(object : SQLParam<BigDecimal>(it) {
+            override fun setParam(preparedStatement: PreparedStatement, position: Int): Unit =
+                preparedStatement.setBigDecimal(position, value)
+        })
+    }
+
+    fun addObject(vararg ps: Any) = ps.forEach {
+        params.add(object : SQLParam<Any>(it) {
+            override fun setParam(preparedStatement: PreparedStatement, position: Int): Unit =
+                preparedStatement.setObject(position, value)
+        })
+    }
 }
 
 /**
  * Interpolates positional parameters into a prepared statement.
  */
-fun PreparedStatement.setParams(vararg params: SQLParam): PreparedStatement = also {
-    params.withIndex().forEach { it.value(this, 1 + it.index) }
+fun PreparedStatement.setParams(vararg params: SQLParam<*>): PreparedStatement = also {
+    params.withIndex().forEach { it.value.setParam(this, 1 + it.index) }
 }
 
 /**
  * Interpolates positional parameters into a prepared statement.
  */
 fun PreparedStatement.setParams(params: Params): PreparedStatement = also {
-    params.array().withIndex().forEach { it.value(this, 1 + it.index) }
+    params.array().withIndex().forEach { it.value.setParam(this, 1 + it.index) }
 }
 
 /**
@@ -204,7 +232,7 @@ internal fun <T : Any> ResultSet.readRecord(recordReader: RecordReader<T>): T {
  *
  * Note that insert gets special treatment, below, as well.
  */
-fun Connection.update(sql: String, vararg params: SQLParam): Int =
+fun Connection.update(sql: String, vararg params: SQLParam<*>): Int =
     prepareStatement(sql).use { it.setParams(* params).executeUpdate() }
 
 fun Connection.update(sql: String, params: (Params.() -> Unit)): Int =
@@ -367,7 +395,7 @@ inline fun <reified T : Any> Connection.unique(sql: String): T? =
 @Throws(SQLException::class, DBException::class)
 @PublishedApi
 internal fun <T : Any> Connection.unique(
-    kClass: KClass<T>, sql: String, params: Array<out SQLParam>
+    kClass: KClass<T>, sql: String, params: Array<out SQLParam<*>>
 ): T? {
     prepareStatement(sql).use { ps ->
         ps.setParams(* params).executeQuery().use { rs ->
@@ -395,7 +423,7 @@ inline fun <reified T : Any> Connection.list(sql: String): List<T> =
 @Throws(SQLException::class, DBException::class)
 @PublishedApi
 internal fun <T : Any> Connection.list(
-    kClass: KClass<T>, sql: String, params: Array<out SQLParam>
+    kClass: KClass<T>, sql: String, params: Array<out SQLParam<*>>
 ): List<T> {
     prepareStatement(sql).use { ps ->
         ps.setParams(* params).executeQuery().use { rs ->
