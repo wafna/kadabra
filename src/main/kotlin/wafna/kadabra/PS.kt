@@ -81,6 +81,7 @@ class Params {
     fun add(vararg ps: SQLParam) = ps.forEach { params.add(it) }
 
     fun addInt(p: Int) = params.add(p.sql)
+    fun addLong(p: Long) = params.add(p.sql)
     fun addDouble(p: Double) = params.add(p.sql)
     fun addStrings(vararg ps: String) = ps.forEach { params.add(it.sql) }
     fun addTimestamp(p: Timestamp) = params.add(p.sql)
@@ -290,12 +291,12 @@ internal fun <R : Any> Connection.insert(
                     ps.setDouble(pos, value)
             }
 
-            BigDecimal::class -> object : FieldWriter<R, BigDecimal>(prop, Types.DOUBLE) {
+            BigDecimal::class -> object : FieldWriter<R, BigDecimal>(prop, Types.NUMERIC) {
                 override fun writeValue(ps: PreparedStatement, pos: Int, value: BigDecimal) =
                     ps.setBigDecimal(pos, value)
             }
 
-            Timestamp::class -> object : FieldWriter<R, Timestamp>(prop, Types.DOUBLE) {
+            Timestamp::class -> object : FieldWriter<R, Timestamp>(prop, Types.TIMESTAMP) {
                 override fun writeValue(ps: PreparedStatement, pos: Int, value: Timestamp) =
                     ps.setTimestamp(pos, value)
             }
