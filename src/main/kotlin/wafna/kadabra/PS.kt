@@ -32,6 +32,7 @@ open class Entity(val tableName: String, val columnNames: List<String>, val fiel
         require(tableName.isNotEmpty())
         require(columnNames.size == fieldNames.size)
     }
+
     /**
      * All the columns (in order), qualified with `prefix`, in a comma separated list.
      * Useful for SELECT and INSERT.
@@ -190,7 +191,11 @@ internal fun <T : Any> ResultSet.readRecord(recordReader: RecordReader<T>): T {
     try {
         return recordReader.ctor.call(* args.toTypedArray())
     } catch (e: java.lang.IllegalArgumentException) {
-        throw DBException("Could not match constructor ${recordReader.ctor.returnType} with arguments", e)
+        throw DBException("Could not match constructor ${recordReader.ctor.returnType} with arguments" +
+                recordReader.ctor.parameters.zip(args)
+                    .joinToString { "\n   ${it.first.name}: ${it.first.type} <- ${it.second?.let { v -> "${v::class.qualifiedName}" } ?: "null"}" },
+            e
+        )
     } catch (e: Throwable) {
         throw DBException("Failed to read record: ${args.joinToString()}", e)
     }
