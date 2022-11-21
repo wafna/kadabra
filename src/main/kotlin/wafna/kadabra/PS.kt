@@ -108,8 +108,6 @@ fun PreparedStatement.setParams(params: Params): PreparedStatement = also {
  * Gets a value from a record set at a position, which position is held in a closure.
  * We don't care what comes back because it will be reflected into the constructor and the JVM will sort it out.
  */
-//private typealias FieldReader = (resultSet: ResultSet) -> Any?
-
 internal abstract class FieldReader(private val columnIndex: Int) {
     fun read(resultSet: ResultSet): Any? {
         try {
