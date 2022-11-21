@@ -50,84 +50,41 @@ fun List<String>.qualify(tableName: String): List<String> =
 fun List<String>.project(): String = joinToString(", ")
 
 /**
- * Holds a value to be set into a prepared statement in a type safe way.
- * This is in lieu of yet more reflection and it makes explicit which types are supported.
- */
-abstract class SQLParam<T>(val value: T) {
-    abstract fun setParam(preparedStatement: PreparedStatement, position: Int)
-}
-
-/**
  * Collection of parameters to prepared statements.
  * Their positions in the prepared statement correspond to the order in which they were added.
  */
-class SQLParams {
-    private val params = mutableListOf<SQLParam<*>>()
+class SQLParams(private val ps: PreparedStatement) {
 
-    fun array(): Array<SQLParam<*>> = params.toTypedArray()
+    private var index = 0
+    private fun next(): Int = ++index
 
     fun add(vararg ps: Int) = ps.forEach {
-        params.add(object : SQLParam<Int>(it) {
-            override fun setParam(preparedStatement: PreparedStatement, position: Int): Unit =
-                preparedStatement.setInt(position, value)
-        })
+        this.ps.setInt(next(), it)
     }
 
     fun add(vararg ps: Long) = ps.forEach {
-        params.add(object : SQLParam<Long>(it) {
-            override fun setParam(preparedStatement: PreparedStatement, position: Int): Unit =
-                preparedStatement.setLong(position, value)
-        })
+        this.ps.setLong(next(), it)
     }
 
     fun add(vararg ps: Double) = ps.forEach {
-        params.add(object : SQLParam<Double>(it) {
-            override fun setParam(preparedStatement: PreparedStatement, position: Int): Unit =
-                preparedStatement.setDouble(position, value)
-        })
+        this.ps.setDouble(next(), it)
     }
 
     fun add(vararg ps: String) = ps.forEach {
-        params.add(object : SQLParam<String>(it) {
-            override fun setParam(preparedStatement: PreparedStatement, position: Int): Unit =
-                preparedStatement.setString(position, value)
-        })
+        this.ps.setString(next(), it)
     }
 
     fun add(vararg ps: Timestamp) = ps.forEach {
-        params.add(object : SQLParam<Timestamp>(it) {
-            override fun setParam(preparedStatement: PreparedStatement, position: Int): Unit =
-                preparedStatement.setTimestamp(position, value)
-        })
+        this.ps.setTimestamp(next(), it)
     }
 
     fun add(vararg ps: BigDecimal) = ps.forEach {
-        params.add(object : SQLParam<BigDecimal>(it) {
-            override fun setParam(preparedStatement: PreparedStatement, position: Int): Unit =
-                preparedStatement.setBigDecimal(position, value)
-        })
+        this.ps.setBigDecimal(next(), it)
     }
 
     fun addObject(vararg ps: Any) = ps.forEach {
-        params.add(object : SQLParam<Any>(it) {
-            override fun setParam(preparedStatement: PreparedStatement, position: Int): Unit =
-                preparedStatement.setObject(position, value)
-        })
+        this.ps.setObject(next(), it)
     }
-}
-
-/**
- * Interpolates positional parameters into a prepared statement.
- */
-private fun PreparedStatement.setParams(vararg params: SQLParam<*>): PreparedStatement = also {
-    params.withIndex().forEach { it.value.setParam(this, 1 + it.index) }
-}
-
-/**
- * Interpolates positional parameters into a prepared statement.
- */
-private fun PreparedStatement.setParams(params: SQLParams): PreparedStatement = also {
-    params.array().withIndex().forEach { it.value.setParam(this, 1 + it.index) }
 }
 
 /**
@@ -237,7 +194,8 @@ fun Connection.update(sql: String): Int =
 
 fun Connection.update(sql: String, params: (SQLParams.() -> Unit)): Int =
     prepareStatement(sql).use {
-        it.setParams(SQLParams().also { p -> p.params() }).executeUpdate()
+        params(SQLParams(it))
+        it.executeUpdate()
     }
 
 /**
@@ -356,7 +314,8 @@ internal fun <R : Any> Connection.insert(
 @Throws(SQLException::class, DBException::class)
 fun Connection.count(sql: String, configure: SQLParams.() -> Unit): Int =
     prepareStatement(sql).use { ps ->
-        countImpl(ps, SQLParams().also { it.configure() })
+        SQLParams(ps).configure()
+        countImpl(ps)
     }
 
 /**
@@ -365,11 +324,11 @@ fun Connection.count(sql: String, configure: SQLParams.() -> Unit): Int =
 @Throws(SQLException::class, DBException::class)
 fun Connection.count(sql: String): Int =
     prepareStatement(sql).use { ps ->
-        countImpl(ps, SQLParams())
+        countImpl(ps)
     }
 
-private fun countImpl(ps: PreparedStatement, params: SQLParams): Int {
-    ps.setParams(params).executeQuery().use { rs ->
+private fun countImpl(ps: PreparedStatement): Int {
+    ps.executeQuery().use { rs ->
         if (1 != rs.metaData.columnCount) throw DBException("Single column expected for COUNT.")
         if (!rs.next()) throw DBException("No data in record set.")
         val count = rs.getInt(1)
@@ -384,55 +343,66 @@ private fun countImpl(ps: PreparedStatement, params: SQLParams): Int {
  */
 @Throws(SQLException::class, DBException::class)
 inline fun <reified T : Any> Connection.unique(sql: String, params: (SQLParams.() -> Unit)): T? =
-    unique(T::class, sql, SQLParams().also { it.params() }.array())
-
-@Throws(SQLException::class, DBException::class)
-inline fun <reified T : Any> Connection.unique(sql: String): T? =
-    unique(T::class, sql, arrayOf())
+    prepareStatement(sql).use { ps ->
+        SQLParams(ps).params()
+        unique(T::class, ps)
+    }
 
 /**
- * Non-inlined version of unique.
+ * Marshals the zero or one results from the query into an optional T.
+ * If more than one record is returned then a `DBException` will be thrown.
+ */
+@Throws(SQLException::class, DBException::class)
+inline fun <reified T : Any> Connection.unique(sql: String): T? =
+    prepareStatement(sql).use { ps ->
+        unique(T::class, ps)
+    }
+
+/**
+ * Non-inlined implementation of unique.
  */
 @Throws(SQLException::class, DBException::class)
 @PublishedApi
-internal fun <T : Any> Connection.unique(
-    kClass: KClass<T>, sql: String, params: Array<out SQLParam<*>>
-): T? {
-    prepareStatement(sql).use { ps ->
-        ps.setParams(* params).executeQuery().use { rs ->
-            if (!rs.next()) return null
-            val recordClass = makeRecordReader(kClass)
-            val record = rs.readRecord(recordClass)
-            if (rs.next()) throw DBException("Non-unique record set.")
-            return record
-        }
+internal fun <T : Any> unique(kClass: KClass<T>, ps: PreparedStatement): T? {
+    ps.executeQuery().use { rs ->
+        if (!rs.next()) return null
+        val recordClass = makeRecordReader(kClass)
+        val record = rs.readRecord(recordClass)
+        if (rs.next()) throw DBException("Non-unique record set.")
+        return record
     }
 }
 
+/**
+ * Marshals the result from a query into a list of T.
+ */
 @Throws(SQLException::class, DBException::class)
 inline fun <reified T : Any> Connection.list(sql: String, params: (SQLParams.() -> Unit)): List<T> =
-    list(T::class, sql, SQLParams().also { p -> p.params() }.array())
-
-@Throws(SQLException::class, DBException::class)
-inline fun <reified T : Any> Connection.list(sql: String): List<T> =
-    list(T::class, sql, arrayOf())
+    prepareStatement(sql).use { ps ->
+        SQLParams(ps).params()
+        list(T::class, ps)
+    }
 
 /**
  * Marshals the result from a query into a list of T.
+ */
+@Throws(SQLException::class, DBException::class)
+inline fun <reified T : Any> Connection.list(sql: String): List<T> =
+    prepareStatement(sql).use { ps ->
+        list(T::class, ps)
+    }
+
+/**
  * Non-inlined implementation of list.
  */
 @Throws(SQLException::class, DBException::class)
 @PublishedApi
-internal fun <T : Any> Connection.list(
-    kClass: KClass<T>, sql: String, params: Array<out SQLParam<*>>
-): List<T> {
-    prepareStatement(sql).use { ps ->
-        ps.setParams(* params).executeQuery().use { rs ->
-            val recordClass = makeRecordReader(kClass)
-            return LinkedList<T>().also { records ->
-                while (rs.next()) {
-                    records.add(rs.readRecord(recordClass))
-                }
+internal fun <T : Any> list(kClass: KClass<T>, ps: PreparedStatement): List<T> {
+    ps.executeQuery().use { rs ->
+        val recordClass = makeRecordReader(kClass)
+        return LinkedList<T>().also { records ->
+            while (rs.next()) {
+                records.add(rs.readRecord(recordClass))
             }
         }
     }
