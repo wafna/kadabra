@@ -190,7 +190,7 @@ internal fun <T : Any> ResultSet.readRecord(recordReader: RecordReader<T>): T {
     try {
         return recordReader.ctor.call(* args.toTypedArray())
     } catch (e: java.lang.IllegalArgumentException) {
-        throw DBException("Could not match constructor ${recordReader.ctor.name} with arguments", e)
+        throw DBException("Could not match constructor ${recordReader.ctor.returnType} with arguments", e)
     } catch (e: Throwable) {
         throw DBException("Failed to read record: ${args.joinToString()}", e)
     }
