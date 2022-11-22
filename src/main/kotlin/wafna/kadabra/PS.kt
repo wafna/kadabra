@@ -236,19 +236,10 @@ internal abstract class FieldWriter<R, T : Any>(private val prop: KProperty1<R, 
  * Inserts a collection of records into a table.
  */
 @Throws(SQLException::class, DBException::class)
-inline fun <reified T : Any> Connection.insert(entity: Entity, record: T): Int =
-    insert(T::class, entity.tableName, entity.fieldMap, record)
-
-/**
- * Non-inlined version of insert.
- */
-@Throws(SQLException::class, DBException::class)
-@PublishedApi
-internal fun <R : Any> Connection.insert(
-    kClass: KClass<R>, table: String, columns: Collection<Pair<String, String>>, record: R
-): Int {
-    require(columns.isNotEmpty()) { "No columns are declared." }
-
+fun <R : Any> Connection.insert(entity: Entity, record: R): Int {
+    val kClass: KClass<R> = record.javaClass.kotlin
+    val table = entity.tableName
+    val columns = entity.fieldMap
     val props: Collection<KProperty1<R, *>> = kClass.declaredMemberProperties
     val propNames = props.toMapStrict { it.name }
 
