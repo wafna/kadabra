@@ -119,19 +119,15 @@ internal data class RecordReader<T>(val ctor: KFunction<T>, val fields: List<Fie
  * Provide a ReadRecord for a type T.
  */
 private fun <T : Any> makeRecordReader(kClass: KClass<T>): RecordReader<T> {
-
     val ctor: KFunction<T> = kClass.primaryConstructor!!
     require(ctor.javaConstructor!!.trySetAccessible()) { "Primary constructor of ${kClass.jvmName} is inaccessible." }
-    val fields: List<FieldReader> = ctor.parameters.withIndex().map { ctorParam ->
-        makeFieldReader(ctorParam.value, 1 + ctorParam.index)
+    val fields: List<FieldReader> = ctor.parameters.withIndex().map {
+        makeFieldReader(it.value, 1 + it.index)
     }
     return RecordReader(ctor, fields)
 }
 
-private fun makeFieldReader(
-    param: KParameter,
-    columnIndex: Int
-): FieldReader {
+private fun makeFieldReader(param: KParameter, columnIndex: Int): FieldReader {
     return when (param) {
         String::class -> object : FieldReader(columnIndex) {
             override fun readField(resultSet: ResultSet): Any? =
