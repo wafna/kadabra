@@ -13,8 +13,8 @@ import kotlin.reflect.jvm.jvmName
  * Converts a collection to a map by applying a key generating function to each element.
  * Fails on key collisions.
  */
-private fun <T : Any, R : Any> Collection<T>.toMapStrict(key: (T) -> R): Map<R, T> =
-    fold(TreeMap<R, T>()) { map, elem ->
+private fun <R : Any, K : Any> Collection<R>.toMapStrict(key: (R) -> K): Map<K, R> =
+    fold(TreeMap<K, R>()) { map, elem ->
         val k = key(elem)
         if (map.containsKey(k))
             throw DBException("Duplicate key: $k")
@@ -30,6 +30,7 @@ class DBException(message: String, cause: Throwable? = null) : Exception(message
 open class Entity(val tableName: String, val columnNames: List<String>, val fieldNames: List<String>) {
     init {
         require(tableName.isNotEmpty())
+        require(columnNames.isNotEmpty())
         require(columnNames.size == fieldNames.size)
     }
 
@@ -244,13 +245,13 @@ internal abstract class FieldReader(private val columnIndex: Int) {
 }
 
 /**
- * Everything needed to create a T from a ResultSet.
+ * Everything needed to create a record of type R from a ResultSet.
  */
-internal data class RecordReader<T>(val ctor: KFunction<T>, val fields: List<FieldReader>)
+internal data class RecordReader<R>(val ctor: KFunction<R>, val fields: List<FieldReader>)
 
 @PublishedApi
 @Throws(DBException::class)
-internal fun <T : Any> ResultSet.readRecord(recordReader: RecordReader<T>): T {
+internal fun <R : Any> ResultSet.readRecord(recordReader: RecordReader<R>): R {
     val args: List<Any?> = recordReader.fields.map { it.read(this) }
     try {
         return recordReader.ctor.call(* args.toTypedArray())
@@ -269,8 +270,8 @@ internal fun <T : Any> ResultSet.readRecord(recordReader: RecordReader<T>): T {
 /**
  * Provide a ReadRecord for a type T.
  */
-private fun <T : Any> makeRecordReader(kClass: KClass<T>): RecordReader<T> {
-    val ctor: KFunction<T> = kClass.primaryConstructor!!
+private fun <R : Any> makeRecordReader(kClass: KClass<R>): RecordReader<R> {
+    val ctor: KFunction<R> = kClass.primaryConstructor!!
     require(ctor.javaConstructor!!.trySetAccessible()) { "Primary constructor of ${kClass.jvmName} is inaccessible." }
     val fields: List<FieldReader> = ctor.parameters.withIndex().map {
         val columnIndex = 1 + it.index
@@ -319,15 +320,15 @@ private fun <T : Any> makeRecordReader(kClass: KClass<T>): RecordReader<T> {
  * If more than one record is returned then a `DBException` will be thrown.
  */
 @Throws(SQLException::class, DBException::class)
-inline fun <reified T : Any> Connection.unique(sql: String, noinline params: (SQLParams.() -> Unit) = {}): T? =
-    unique(T::class, sql, params)
+inline fun <reified R : Any> Connection.unique(sql: String, noinline params: (SQLParams.() -> Unit) = {}): R? =
+    unique(R::class, sql, params)
 
 /**
  * Non-inlined implementation of unique.
  */
 @Throws(SQLException::class, DBException::class)
 @PublishedApi
-internal fun <T : Any> Connection.unique(kClass: KClass<T>, sql: String, params: (SQLParams.() -> Unit)): T? =
+internal fun <R : Any> Connection.unique(kClass: KClass<R>, sql: String, params: (SQLParams.() -> Unit)): R? =
     prepareStatement(sql).use { ps ->
         SQLParams(ps).params()
         ps.executeQuery().use { rs ->
@@ -344,20 +345,20 @@ internal fun <T : Any> Connection.unique(kClass: KClass<T>, sql: String, params:
  * Marshals the result from a query into a list of T.
  */
 @Throws(SQLException::class, DBException::class)
-inline fun <reified T : Any> Connection.list(sql: String, noinline params: (SQLParams.() -> Unit) = {}): List<T> =
-    list(T::class, sql, params)
+inline fun <reified R : Any> Connection.list(sql: String, noinline params: (SQLParams.() -> Unit) = {}): List<R> =
+    list(R::class, sql, params)
 
 /**
  * Non-inlined implementation of list.
  */
 @Throws(SQLException::class, DBException::class)
 @PublishedApi
-internal fun <T : Any> Connection.list(kClass: KClass<T>, sql: String, params: (SQLParams.() -> Unit)): List<T> =
+internal fun <R : Any> Connection.list(kClass: KClass<R>, sql: String, params: (SQLParams.() -> Unit)): List<R> =
     prepareStatement(sql).use { ps ->
         SQLParams(ps).params()
         ps.executeQuery().use { rs ->
             val recordClass = makeRecordReader(kClass)
-            LinkedList<T>().also { records ->
+            LinkedList<R>().also { records ->
                 while (rs.next()) {
                     records.add(rs.readRecord(recordClass))
                 }
