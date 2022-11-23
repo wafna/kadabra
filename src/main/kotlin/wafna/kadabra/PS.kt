@@ -92,108 +92,12 @@ class SQLParams(private val ps: PreparedStatement) {
 }
 
 /**
- * Gets a value from a result set at a position.
- * We don't care what comes back because it will be reflected into the constructor and the JVM will sort it out.
- */
-internal abstract class FieldReader(private val columnIndex: Int) {
-    fun read(resultSet: ResultSet): Any? {
-        try {
-            return readField(resultSet)?.let {
-                // Sometimes we get a default value (viz. primitives, unboxed values) for null.
-                if (resultSet.wasNull()) null else it
-            }
-        } catch (e: Throwable) {
-            throw DBException("Cannot get parameter at position $columnIndex.", e)
-        }
-    }
-
-    protected abstract fun readField(resultSet: ResultSet): Any?
-}
-
-/**
- * Everything needed to create a T from a ResultSet.
- */
-internal data class RecordReader<T>(val ctor: KFunction<T>, val fields: List<FieldReader>)
-
-/**
- * Provide a ReadRecord for a type T.
- */
-private fun <T : Any> makeRecordReader(kClass: KClass<T>): RecordReader<T> {
-    val ctor: KFunction<T> = kClass.primaryConstructor!!
-    require(ctor.javaConstructor!!.trySetAccessible()) { "Primary constructor of ${kClass.jvmName} is inaccessible." }
-    val fields: List<FieldReader> = ctor.parameters.withIndex().map {
-        makeFieldReader(it.value, 1 + it.index)
-    }
-    return RecordReader(ctor, fields)
-}
-
-private fun makeFieldReader(param: KParameter, columnIndex: Int): FieldReader {
-    return when (param) {
-        String::class -> object : FieldReader(columnIndex) {
-            override fun readField(resultSet: ResultSet): Any? =
-                resultSet.getString(columnIndex)
-        }
-
-        Integer::class -> object : FieldReader(columnIndex) {
-            override fun readField(resultSet: ResultSet): Any =
-                resultSet.getInt(columnIndex)
-        }
-
-        Long::class -> object : FieldReader(columnIndex) {
-            override fun readField(resultSet: ResultSet): Any =
-                resultSet.getLong(columnIndex)
-        }
-
-        Double::class -> object : FieldReader(columnIndex) {
-            override fun readField(resultSet: ResultSet): Any =
-                resultSet.getDouble(columnIndex)
-        }
-
-        BigDecimal::class -> object : FieldReader(columnIndex) {
-            override fun readField(resultSet: ResultSet): Any? =
-                resultSet.getBigDecimal(columnIndex)
-        }
-
-        Timestamp::class -> object : FieldReader(columnIndex) {
-            override fun readField(resultSet: ResultSet): Any? =
-                resultSet.getTimestamp(columnIndex)
-        }
-
-        else -> object : FieldReader(columnIndex) {
-            override fun readField(resultSet: ResultSet): Any? =
-                resultSet.getObject(columnIndex)
-        }
-    }
-}
-
-@PublishedApi
-@Throws(DBException::class)
-internal fun <T : Any> ResultSet.readRecord(recordReader: RecordReader<T>): T {
-    val args: List<Any?> = recordReader.fields.map { it.read(this) }
-    try {
-        return recordReader.ctor.call(* args.toTypedArray())
-    } catch (e: java.lang.IllegalArgumentException) {
-        throw DBException(
-            "Could not match constructor ${recordReader.ctor.returnType} with arguments" +
-                    recordReader.ctor.parameters.zip(args)
-                        .joinToString { "\n   ${it.first.name}: ${it.first.type} <- ${it.second?.let { v -> "${v::class.qualifiedName}" } ?: "null"}" },
-            e
-        )
-    } catch (e: Throwable) {
-        throw DBException("Failed to read record: ${args.joinToString()}", e)
-    }
-}
-
-/**
  * Runs a mutating statement (CREATE, INSERT, UPDATE, or DELETE),
  * interpolating the params in order to the prepared statement.
  *
  * Note that insert gets special treatment, below, as well.
  */
-fun Connection.update(sql: String): Int =
-    prepareStatement(sql).use { it.executeUpdate() }
-
-fun Connection.update(sql: String, params: (SQLParams.() -> Unit)): Int =
+fun Connection.update(sql: String, params: (SQLParams.() -> Unit) = {}): Int =
     prepareStatement(sql).use {
         params(SQLParams(it))
         it.executeUpdate()
@@ -304,18 +208,9 @@ fun <R : Any> Connection.insert(entity: Entity, record: R): Int {
  * For SELECT COUNT statements that return a single record with a single integer column.
  */
 @Throws(SQLException::class, DBException::class)
-fun Connection.count(sql: String, configure: SQLParams.() -> Unit): Int =
+fun Connection.count(sql: String, configure: SQLParams.() -> Unit = {}): Int =
     prepareStatement(sql).use { ps ->
         SQLParams(ps).configure()
-        countImpl(ps)
-    }
-
-/**
- * For SELECT COUNT statements that return a single record with a single integer column.
- */
-@Throws(SQLException::class, DBException::class)
-fun Connection.count(sql: String): Int =
-    prepareStatement(sql).use { ps ->
         countImpl(ps)
     }
 
@@ -330,73 +225,143 @@ private fun countImpl(ps: PreparedStatement): Int {
 }
 
 /**
- * Marshals the zero or one results from the query into an optional T.
- * If more than one record is returned then a `DBException` will be thrown.
+ * Gets a value from a result set at a position.
+ * We don't care what comes back because it will be reflected into the constructor and the JVM will sort it out.
  */
-@Throws(SQLException::class, DBException::class)
-inline fun <reified T : Any> Connection.unique(sql: String, params: (SQLParams.() -> Unit)): T? =
-    prepareStatement(sql).use { ps ->
-        SQLParams(ps).params()
-        unique(T::class, ps)
+internal abstract class FieldReader(private val columnIndex: Int) {
+    fun read(resultSet: ResultSet): Any? {
+        try {
+            return readField(resultSet)?.let {
+                // Sometimes we get a default value (viz. primitives, unboxed values) for null.
+                if (resultSet.wasNull()) null else it
+            }
+        } catch (e: Throwable) {
+            throw DBException("Cannot get parameter at position $columnIndex.", e)
+        }
     }
+
+    protected abstract fun readField(resultSet: ResultSet): Any?
+}
+
+/**
+ * Everything needed to create a T from a ResultSet.
+ */
+internal data class RecordReader<T>(val ctor: KFunction<T>, val fields: List<FieldReader>)
+
+@PublishedApi
+@Throws(DBException::class)
+internal fun <T : Any> ResultSet.readRecord(recordReader: RecordReader<T>): T {
+    val args: List<Any?> = recordReader.fields.map { it.read(this) }
+    try {
+        return recordReader.ctor.call(* args.toTypedArray())
+    } catch (e: java.lang.IllegalArgumentException) {
+        throw DBException(
+            "Could not match constructor ${recordReader.ctor.returnType} with arguments" +
+                    recordReader.ctor.parameters.zip(args)
+                        .joinToString { "\n   ${it.first.name}: ${it.first.type} <- ${it.second?.let { v -> "${v::class.qualifiedName}" } ?: "null"}" },
+            e
+        )
+    } catch (e: Throwable) {
+        throw DBException("Failed to read record: ${args.joinToString()}", e)
+    }
+}
+
+/**
+ * Provide a ReadRecord for a type T.
+ */
+private fun <T : Any> makeRecordReader(kClass: KClass<T>): RecordReader<T> {
+    val ctor: KFunction<T> = kClass.primaryConstructor!!
+    require(ctor.javaConstructor!!.trySetAccessible()) { "Primary constructor of ${kClass.jvmName} is inaccessible." }
+    val fields: List<FieldReader> = ctor.parameters.withIndex().map {
+        val columnIndex = 1 + it.index
+        when (it.value) {
+            String::class -> object : FieldReader(columnIndex) {
+                override fun readField(resultSet: ResultSet): Any? =
+                    resultSet.getString(columnIndex)
+            }
+
+            Integer::class -> object : FieldReader(columnIndex) {
+                override fun readField(resultSet: ResultSet): Any =
+                    resultSet.getInt(columnIndex)
+            }
+
+            Long::class -> object : FieldReader(columnIndex) {
+                override fun readField(resultSet: ResultSet): Any =
+                    resultSet.getLong(columnIndex)
+            }
+
+            Double::class -> object : FieldReader(columnIndex) {
+                override fun readField(resultSet: ResultSet): Any =
+                    resultSet.getDouble(columnIndex)
+            }
+
+            BigDecimal::class -> object : FieldReader(columnIndex) {
+                override fun readField(resultSet: ResultSet): Any? =
+                    resultSet.getBigDecimal(columnIndex)
+            }
+
+            Timestamp::class -> object : FieldReader(columnIndex) {
+                override fun readField(resultSet: ResultSet): Any? =
+                    resultSet.getTimestamp(columnIndex)
+            }
+
+            else -> object : FieldReader(columnIndex) {
+                override fun readField(resultSet: ResultSet): Any? =
+                    resultSet.getObject(columnIndex)
+            }
+        }
+    }
+    return RecordReader(ctor, fields)
+}
 
 /**
  * Marshals the zero or one results from the query into an optional T.
  * If more than one record is returned then a `DBException` will be thrown.
  */
 @Throws(SQLException::class, DBException::class)
-inline fun <reified T : Any> Connection.unique(sql: String): T? =
-    prepareStatement(sql).use { ps ->
-        unique(T::class, ps)
-    }
+inline fun <reified T : Any> Connection.unique(sql: String, noinline params: (SQLParams.() -> Unit) = {}): T? =
+    unique(T::class, sql, params)
 
 /**
  * Non-inlined implementation of unique.
  */
 @Throws(SQLException::class, DBException::class)
 @PublishedApi
-internal fun <T : Any> unique(kClass: KClass<T>, ps: PreparedStatement): T? {
-    ps.executeQuery().use { rs ->
-        if (!rs.next()) return null
-        val recordClass = makeRecordReader(kClass)
-        val record = rs.readRecord(recordClass)
-        if (rs.next()) throw DBException("Non-unique record set.")
-        return record
-    }
-}
-
-/**
- * Marshals the result from a query into a list of T.
- */
-@Throws(SQLException::class, DBException::class)
-inline fun <reified T : Any> Connection.list(sql: String, params: (SQLParams.() -> Unit)): List<T> =
+internal fun <T : Any> Connection.unique(kClass: KClass<T>, sql: String, params: (SQLParams.() -> Unit)): T? =
     prepareStatement(sql).use { ps ->
         SQLParams(ps).params()
-        list(T::class, ps)
+        ps.executeQuery().use { rs ->
+            if (!rs.next()) return null
+            val recordClass = makeRecordReader(kClass)
+            val record = rs.readRecord(recordClass)
+            if (rs.next()) throw DBException("Non-unique record set.")
+            record
+        }
     }
+
 
 /**
  * Marshals the result from a query into a list of T.
  */
 @Throws(SQLException::class, DBException::class)
-inline fun <reified T : Any> Connection.list(sql: String): List<T> =
-    prepareStatement(sql).use { ps ->
-        list(T::class, ps)
-    }
+inline fun <reified T : Any> Connection.list(sql: String, noinline params: (SQLParams.() -> Unit) = {}): List<T> =
+    list(T::class, sql, params)
 
 /**
  * Non-inlined implementation of list.
  */
 @Throws(SQLException::class, DBException::class)
 @PublishedApi
-internal fun <T : Any> list(kClass: KClass<T>, ps: PreparedStatement): List<T> {
-    ps.executeQuery().use { rs ->
-        val recordClass = makeRecordReader(kClass)
-        return LinkedList<T>().also { records ->
-            while (rs.next()) {
-                records.add(rs.readRecord(recordClass))
+internal fun <T : Any> Connection.list(kClass: KClass<T>, sql: String, params: (SQLParams.() -> Unit)): List<T> =
+    prepareStatement(sql).use { ps ->
+        SQLParams(ps).params()
+        ps.executeQuery().use { rs ->
+            val recordClass = makeRecordReader(kClass)
+            LinkedList<T>().also { records ->
+                while (rs.next()) {
+                    records.add(rs.readRecord(recordClass))
+                }
             }
         }
     }
-}
 
