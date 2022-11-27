@@ -122,7 +122,7 @@ internal abstract class FieldWriter<R, T : Any>(private val prop: KProperty1<R, 
             try {
                 ps.setNull(pos, columnType)
             } catch (e: Throwable) {
-                throw DBException("Cannot set NULL with column type $columnType at position $pos.")
+                throw DBException("Cannot set NULL with column type $columnType at position $pos.", e)
             }
         } else {
             @Suppress("UNCHECKED_CAST")
